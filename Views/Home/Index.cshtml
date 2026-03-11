@@ -1,0 +1,98 @@
+@model List<thinking1.Models.ScenarioSummary>
+@{
+    ViewData["Title"] = "Think — Engineer Scenario Simulator";
+}
+
+<!-- HERO SECTION -->
+<section class="hero-section">
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-lg-9 text-center">
+                <p class="hero-eyebrow">Engineer Scenario Simulator</p>
+                <h1 class="hero-headline">Would you make the right call?</h1>
+                <p class="hero-subheadline">Real-world scenarios for engineers who want to sharpen their judgment under pressure. No syntax tests. No theory. Just decisions that matter.</p>
+
+                <div class="how-it-works mt-5">
+                    <div class="row g-4 justify-content-center">
+                        <div class="col-md-4">
+                            <div class="step-card">
+                                <div class="step-number">01</div>
+                                <p class="step-text">Choose a scenario from real engineering situations</p>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="step-card">
+                                <div class="step-number">02</div>
+                                <p class="step-text">Answer 7–8 questions one at a time in wizard style</p>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="step-card">
+                                <div class="step-number">03</div>
+                                <p class="step-text">Get your score and learn what a senior engineer would do</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <a href="#scenarios" class="btn btn-primary-custom mt-5">Start a Scenario</a>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ABOUT SECTION -->
+<section class="about-section">
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-lg-7 text-center">
+                <p class="about-text">
+                    This platform simulates the moments that define engineering careers — production incidents, system thinking, technical strategies, deployment decisions, stakeholder communication, and team dynamics. These are not textbook exercises. Every scenario reflects the kind of real situations engineers face under pressure but rarely get to practice before they happen.
+                </p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- SCENARIOS SECTION -->
+<section class="scenarios-section" id="scenarios">
+    <div class="container">
+        <h2 class="section-heading text-center mb-5">Choose Your Scenario</h2>
+        <div class="row g-4">
+            @foreach (var scenario in Model)
+            {
+                <div class="col-lg-4 col-md-6">
+                    <div class="scenario-card @(!scenario.IsAvailable ? "scenario-card--muted" : "")">
+                        <div class="scenario-card-top">
+                            <span class="badge type-badge">@scenario.Type</span>
+                            @if (!scenario.IsAvailable)
+                            {
+                                <span class="badge coming-soon-badge">Coming Soon</span>
+                            }
+                        </div>
+                        <h3 class="scenario-title">@scenario.Title</h3>
+                        <p class="scenario-desc">@scenario.Description</p>
+                        <div class="scenario-meta">
+                            <span class="meta-item">
+                                <span class="meta-label">Difficulty</span>
+                                <span class="meta-value difficulty-@scenario.DifficultyLabel.ToLower()">@scenario.DifficultyLabel</span>
+                            </span>
+                            <span class="meta-item">
+                                <span class="meta-label">Time</span>
+                                <span class="meta-value">~@scenario.EstimatedMinutes min</span>
+                            </span>
+                            <span class="meta-item">
+                                <span class="meta-label">Questions</span>
+                                <span class="meta-value">@scenario.TotalQuestions</span>
+                            </span>
+                        </div>
+                        @if (scenario.IsAvailable)
+                        {
+                            <a href="/Scenario/Start/@scenario.Id" class="btn btn-start w-100">Start Scenario</a>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+</section>

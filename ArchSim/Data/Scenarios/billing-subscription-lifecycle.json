@@ -1,0 +1,284 @@
+{
+  "id": "billing-subscription-lifecycle",
+  "title": "Billing & Subscription Lifecycle",
+  "category": "Distributed Systems & Business Logic",
+  "difficulty": "10plus yrs",
+  "sequence": 4,
+  "estimatedMinutes": 5,
+  "description": "A enterprise SaaS platform manages thousands of subscribers across trial, paid, downgrade, and cancellation states. Navigate the hardest architectural decisions in subscription lifecycle management — distributed transactions, data retention, and seamless reactivation.",
+  "tags": [ "Billing", "Saga Pattern", "Distributed Transactions", "Event-Driven", "Data Retention", "Azure Service Bus" ],
+
+  "interviewer": {
+    "name": "Priya Nair",
+    "role": "Principal Engineer, Enterprise SaaS",
+    "avatar": "PN"
+  },
+
+  "steps": [
+    {
+      "stepNumber": 1,
+      "interviewerSays": "A trial customer clicks 'Upgrade to Paid'. This single action needs to charge their card, activate their subscription, unlock premium features, and send a welcome email. These touch four different services. How do you design this so a partial failure — say the charge succeeds but feature unlock fails — does not leave the system in an inconsistent state?",
+      "context": "This is the distributed transaction problem. There is no global ACID transaction across microservices. They want to see if you know the Saga pattern and can articulate compensating transactions clearly.",
+      "type": "single-choice",
+      "options": [
+        {
+          "id": "A",
+          "text": "Wrap all four operations in a single database transaction using a shared database — if any step fails, the transaction rolls back atomically",
+          "score": 1,
+          "tag": "Breaks Microservices",
+          "tagColor": "orange",
+          "interviewerReaction": "That requires all four services to share a single database, which collapses your microservices into a distributed monolith. You lose independent deployability and scalability. How do you solve this without a shared database?"
+        },
+        {
+          "id": "B",
+          "text": "Use a Choreography-based Saga — each service publishes an event on success, the next service listens and proceeds, and each service has a compensating transaction it executes if a downstream failure event is received",
+          "score": 7,
+          "tag": "Good Pattern, Incomplete",
+          "tagColor": "yellow",
+          "interviewerReaction": "Choreography Saga is valid but at four services it becomes hard to reason about — the business flow is implicit, scattered across event handlers. What happens when you need to debug a failed upgrade at 2am? Is there a better coordination model for this specific flow?"
+        },
+        {
+          "id": "C",
+          "text": "Use an Orchestration-based Saga with a dedicated Subscription Orchestrator service — it drives each step in sequence, tracks state explicitly, and executes compensating transactions in reverse order if any step fails",
+          "score": 10,
+          "tag": "Excellent",
+          "tagColor": "green",
+          "interviewerReaction": "Exactly right. A central orchestrator makes the business flow explicit, observable, and debuggable. Compensating transactions give you eventual consistency without a distributed lock. Walk me through what happens when a client on the paid plan wants to downgrade."
+        }
+      ],
+      "idealAnswer": {
+        "summary": "Distributed transactions across microservices require the Saga pattern. For a multi-step billing flow, an Orchestration-based Saga with a dedicated orchestrator is superior to choreography — the business flow is explicit, failures are localised, and compensating transactions are predictable.",
+        "sections": [
+          {
+            "type": "text",
+            "heading": "Why You Cannot Use a Database Transaction Here",
+            "content": "In a microservices architecture, each service owns its data exclusively. Billing Service owns payment records in its database. Subscription Service owns plan state in its database. Feature Flag Service owns entitlements. Notification Service owns message queues.\n\nThere is no shared database and no distributed transaction coordinator that can span these boundaries with ACID guarantees at scale. Two-Phase Commit (2PC) exists but it creates distributed locks that destroy throughput and availability — it is effectively unusable at SaaS scale.\n\nThe industry solution is the Saga pattern: a sequence of local transactions, each publishing an event or message, with compensating transactions defined for every step so that failures can be rolled back semantically rather than technically."
+          },
+          {
+            "type": "architecture-block",
+            "heading": "Orchestration Saga — Upgrade Flow",
+            "content": "  User clicks: Upgrade to Paid\n                    │\n                    ▼\n        ┌─────────────────────────┐\n        │  Subscription           │\n        │  Orchestrator           │  ← Persists saga state\n        │  (State Machine)        │    in its own DB\n        └──────────┬──────────────┘\n                   │\n         ┌─────────▼──────────┐\n         │  STEP 1            │\n         │  Billing Service   │\n         │  Charge card       │\n         │  → Success: token  │\n         │  → Fail: STOP,     │\n         │    return error    │\n         └─────────┬──────────┘\n                   │ success\n         ┌─────────▼──────────┐\n         │  STEP 2            │\n         │  Subscription      │\n         │  Service           │\n         │  Activate plan     │\n         │  → Fail: trigger   │◄── Compensate STEP 1:\n         │    compensation    │    Refund charge\n         └─────────┬──────────┘\n                   │ success\n         ┌─────────▼──────────┐\n         │  STEP 3            │\n         │  Feature Flag      │\n         │  Service           │\n         │  Unlock premium    │\n         │  → Fail: trigger   │◄── Compensate STEP 2:\n         │    compensation    │    Deactivate plan\n         └─────────┬──────────┘    Compensate STEP 1:\n                   │ success        Refund charge\n         ┌─────────▼──────────┐\n         │  STEP 4            │\n         │  Notification      │\n         │  Service           │\n         │  Send welcome email│\n         │  → Fail: log +     │◄── Non-compensable:\n         │    retry only      │    Email not sent is\n         └─────────┬──────────┘    acceptable, charge\n                   │                is not reversible\n                   ▼                for email failure\n            Saga Complete\n            State: COMPLETED"
+          },
+          {
+            "type": "key-principles",
+            "heading": "Key Principles",
+            "items": [
+              "Orchestrator persists saga state after every step — if the orchestrator crashes mid-saga, it resumes from last known state on restart",
+              "Compensating transactions must be idempotent — if compensation is retried due to a network failure, running it twice must not double-refund or double-deactivate",
+              "Not all steps are compensable — a sent email cannot be unsent. Design non-compensable steps to be last in the sequence where possible",
+              "Use Azure Service Bus for orchestrator-to-service communication — durable messaging ensures commands survive pod restarts",
+              "Every saga instance has a unique correlation ID — use this as the distributed trace ID so the entire upgrade flow is observable end-to-end in Application Insights"
+            ]
+          },
+          {
+            "type": "warning",
+            "heading": "The Dual Write Problem Inside Each Step",
+            "content": "Inside each service, there is a subtler problem: Billing Service must charge the card AND publish a success event to Service Bus. If the charge succeeds but the publish fails, the orchestrator never advances and the saga is stuck.\n\nThe fix is the Outbox Pattern — Billing Service writes the charge record AND the outgoing event to its own database in a single local transaction. A separate relay process reads from the outbox table and publishes to Service Bus. This guarantees the event is eventually published even if the pod crashes immediately after the DB write. Never write to a database and publish to a message broker as two separate non-atomic operations."
+          },
+          {
+            "type": "tradeoffs",
+            "heading": "Trade-offs",
+            "pros": [
+              "Business flow is explicit and visible in one place — the orchestrator — not scattered across event handlers",
+              "Saga state is persisted — partial failures are recoverable without manual intervention",
+              "Each service remains independent — no shared database, no distributed lock",
+              "Full observability — every state transition is logged with timestamps and correlation IDs"
+            ],
+            "cons": [
+              "Orchestrator is a new service to build, deploy, and operate — adds initial complexity",
+              "Eventual consistency means a brief window where charge has succeeded but features are not yet unlocked — handle with a 'processing' UI state",
+              "Compensating transactions must be carefully designed and tested — they are the hardest part to get right and the least frequently exercised in development"
+            ]
+          }
+        ],
+        "oneLineSummary": "When a business operation spans multiple services, an Orchestration Saga with explicit compensating transactions is the only reliable path to consistency — distributed locks and shared databases are not options at scale."
+      }
+    },
+    {
+      "stepNumber": 2,
+      "interviewerSays": "Good. Now a different scenario. An enterprise client is downgrading from Premium to Basic plan. Premium allowed 100GB storage and 50 active users. Basic allows 20GB and 10 users. This client currently has 47GB of data and 38 active users. How do you handle this downgrade architecturally — what happens to the overage, and how do you design the system to enforce new plan limits without destroying customer data?",
+      "context": "This is a deceptively complex product and architecture problem. The wrong answer destroys customer data or blocks the downgrade entirely. The right answer introduces a grace period model with soft and hard limits — a pattern used by every mature SaaS billing system.",
+      "type": "single-choice",
+      "options": [
+        {
+          "id": "A",
+          "text": "Block the downgrade entirely until the client manually reduces their storage to under 20GB and deactivates users down to 10 — enforce limits strictly before plan change is allowed",
+          "score": 3,
+          "tag": "Poor UX, Loses Customers",
+          "tagColor": "orange",
+          "interviewerReaction": "Blocking the downgrade creates immediate churn risk — the client cannot downgrade without destroying their own data first, so they may simply cancel instead. Is there a way to allow the downgrade while giving them time to resolve the overage?"
+        },
+        {
+          "id": "B",
+          "text": "Silently delete data and deactivate users to bring them within Basic plan limits as part of the downgrade process — enforce the new limits immediately and automatically",
+          "score": 0,
+          "tag": "Never Do This",
+          "tagColor": "orange",
+          "interviewerReaction": "Automatically deleting a paying customer's data without explicit consent is a GDPR violation, a contractual breach, and a trust-destroying event. This is a company-ending mistake. How do you handle overage without touching customer data?"
+        },
+        {
+          "id": "C",
+          "text": "Allow the downgrade immediately, enter the account into a grace period with soft and hard limit enforcement — read-only overage data, proactive notifications, and hard cutoff only after the grace period expires with explicit customer acknowledgement",
+          "score": 10,
+          "tag": "Excellent",
+          "tagColor": "green",
+          "interviewerReaction": "That is exactly how mature SaaS billing works. Grace periods protect the customer relationship while still enforcing limits. Walk me through how you would design reactivation if this client eventually cancels their subscription entirely."
+        }
+      ],
+      "idealAnswer": {
+        "summary": "Plan downgrades with overage must never destroy data automatically. The correct model is a grace period with progressive enforcement — soft limits first, hard limits after a defined window, with explicit customer acknowledgement required before any data action.",
+        "sections": [
+          {
+            "type": "text",
+            "heading": "The Three-Phase Downgrade Model",
+            "content": "When a client downgrades with overage, the system moves through three phases:\n\nPhase 1 — Grace Period (Day 0 to Day 30): Plan is downgraded immediately for billing purposes. The client pays Basic rates. However, their existing data and users remain accessible. They are in overage but not yet restricted. Daily notification emails remind them of the overage and what they need to do.\n\nPhase 2 — Soft Enforcement (Day 30): New data cannot be added beyond Basic limits. Existing overage data remains readable. New users cannot be invited but existing 38 users remain active. The account is flagged as read-only-overage in the Feature Flag Service.\n\nPhase 3 — Hard Enforcement (Day 60): If the client has not resolved the overage, excess users are deactivated (not deleted) and excess data is moved to a locked-but-retained state. Data is never deleted — it is archived and inaccessible until they upgrade or explicitly request deletion."
+          },
+          {
+            "type": "architecture-block",
+            "heading": "Downgrade Architecture",
+            "content": "  Client clicks: Downgrade to Basic\n                    │\n                    ▼\n        Subscription Orchestrator\n        ┌───────────────────────────────┐\n        │  1. Update plan in DB         │\n        │     plan: basic               │\n        │     overageState: grace       │\n        │     graceStartDate: today     │\n        │     graceEndDate: +30 days    │\n        │                               │\n        │  2. Billing Service           │\n        │     → Apply Basic rate        │\n        │       from next billing cycle │\n        │                               │\n        │  3. Feature Flag Service      │\n        │     → Set plan: basic         │\n        │     → Set overage: grace      │\n        │     → New uploads: ALLOWED    │\n        │     → New users: ALLOWED      │\n        │       (grace period)          │\n        │                               │\n        │  4. Notification Service      │\n        │     → Send downgrade confirm  │\n        │     → Schedule daily reminders│\n        └───────────────────────────────┘\n                    │\n                    ▼\n        ┌─────────────────────────────────┐\n        │  Azure Function (Daily Timer)   │\n        │                                 │\n        │  Checks all accounts in         │\n        │  overageState: grace            │\n        │                                 │\n        │  Day 30: → soft enforcement     │\n        │  Day 60: → hard enforcement     │\n        │  Day 90: → archive overage data │\n        └─────────────────────────────────┘\n\n  LIMIT ENFORCEMENT MODEL:\n  ┌──────────────┬───────────┬──────────┬──────────┐\n  │ Phase        │ New Data  │ New Users│ Read Data│\n  ├──────────────┼───────────┼──────────┼──────────┤\n  │ Grace (0-30) │ Allowed   │ Allowed  │ Full     │\n  │ Soft (30-60) │ Blocked   │ Blocked  │ Full     │\n  │ Hard (60-90) │ Blocked   │ Blocked  │ Overage  │\n  │              │           │          │ locked   │\n  │ Archive(90+) │ Blocked   │ Blocked  │ Archived │\n  └──────────────┴───────────┴──────────┴──────────┘"
+          },
+          {
+            "type": "key-principles",
+            "heading": "Key Principles",
+            "items": [
+              "Never automatically delete customer data — archive it, lock it, but deletion requires explicit customer consent and action",
+              "Grace period enforcement is driven by a scheduled Azure Function — not by real-time checks on every request, which would add latency",
+              "Overage state lives in the Feature Flag Service — every API request checks entitlements there, not in the Billing Service",
+              "Deactivated users retain their data, permissions, and history — reactivation restores them exactly as they were",
+              "All phase transitions are audited with timestamps — required for dispute resolution when clients claim they were not notified"
+            ]
+          },
+          {
+            "type": "warning",
+            "heading": "The Entitlement Check Anti-Pattern",
+            "content": "A common mistake is checking plan limits inside the Billing Service on every API request — 'is this tenant on Basic or Premium?' This couples your product features to your billing domain and makes every feature check a cross-service call.\n\nThe correct model: Billing Service owns the financial transaction. Feature Flag Service owns the entitlements. When a plan changes, Billing Service publishes a 'plan.changed' event. Feature Flag Service subscribes and updates its own entitlement records. Every product service checks Feature Flag Service only — it never calls Billing Service to make a product decision."
+          },
+          {
+            "type": "tradeoffs",
+            "heading": "Trade-offs",
+            "pros": [
+              "Grace period dramatically reduces churn at downgrade — clients have time to adapt without feeling punished",
+              "Data is never destroyed automatically — eliminates GDPR risk and contractual breach risk entirely",
+              "Progressive enforcement gives the customer relationship team time to intervene and potentially upsell back to Premium",
+              "Archived data enables clean reactivation — the client can return months later to exactly their previous state"
+            ],
+            "cons": [
+              "Grace period means you are providing Premium-equivalent infrastructure at Basic pricing for up to 30 days — a real cost to model",
+              "More complex enforcement state machine — grace, soft, hard, archived states must all be handled in every feature check",
+              "Notification fatigue risk — daily reminder emails during grace period may annoy clients if not carefully worded"
+            ]
+          }
+        ],
+        "oneLineSummary": "Plan downgrades with overage are a customer relationship problem as much as an architecture problem — grace periods, progressive enforcement, and never deleting data automatically are the principles that keep both customers and lawyers happy."
+      }
+    },
+    {
+      "stepNumber": 3,
+      "interviewerSays": "Final question. A client cancelled their subscription 6 months ago. Your retention policy keeps their data for 12 months post-cancellation. They have just called your sales team and want to reactivate. They expect their data, users, configuration, and integrations to be exactly as they left them. How did you design the system at cancellation time to make this reactivation possible — and what does the reactivation flow look like?",
+      "context": "This tests forward-thinking design. Most engineers think about cancellation as a delete operation. Senior architects think about cancellation as a state transition that must preserve future reactivation capability. The design decision at cancellation time determines whether reactivation is a 5-minute automated flow or a 2-week manual restoration nightmare.",
+      "type": "single-choice",
+      "options": [
+        {
+          "id": "A",
+          "text": "At cancellation, export all customer data to a ZIP archive in cold storage and delete the live records. On reactivation, manually restore from the archive — a professional services team handles this within 5 business days",
+          "score": 3,
+          "tag": "Operationally Expensive",
+          "tagColor": "orange",
+          "interviewerReaction": "Manual restoration by a professional services team is slow, expensive, and error-prone. At scale with thousands of cancelled tenants this does not work. If a client wants to reactivate at 11pm on a Friday, they are waiting until Wednesday. How do you make reactivation self-serve and instant?"
+        },
+        {
+          "id": "B",
+          "text": "At cancellation, transition the tenant to a CANCELLED state — suspend all services, deactivate all users, stop all jobs, but retain all data in place in the live database with a soft-delete flag. On reactivation, flip the state back to ACTIVE, reactivate users, restart jobs, and charge the first invoice — fully automated in under 5 minutes",
+          "score": 10,
+          "tag": "Excellent",
+          "tagColor": "green",
+          "interviewerReaction": "That is the right design. Cancellation is a state transition, not a deletion event. Keeping data in place with a CANCELLED state flag makes reactivation a matter of flipping state and restarting services — no restoration required. How do you handle the infrastructure cost of retaining live database records for thousands of cancelled tenants for 12 months?"
+        },
+        {
+          "id": "C",
+          "text": "At cancellation, immediately delete all customer data to free up infrastructure resources, but retain a metadata record with the client's configuration settings. On reactivation, provision a fresh tenant using the saved configuration — users will need to re-register and re-upload their data",
+          "score": 1,
+          "tag": "Destroys Reactivation Value",
+          "tagColor": "orange",
+          "interviewerReaction": "Deleting the data eliminates the primary value proposition of reactivation — the client returns to find their history gone and users locked out. This is likely a GDPR violation too if data was deleted before the retention period the client was promised. What should you have retained?"
+        }
+      ],
+      "idealAnswer": {
+        "summary": "Cancellation must be designed as a reversible state transition, not a deletion event. All data is retained in-place under a CANCELLED tenant state. Reactivation is a fully automated state flip that restores the client to exactly their previous state in minutes — no manual intervention, no data loss.",
+        "sections": [
+          {
+            "type": "text",
+            "heading": "Cancellation as a State Machine",
+            "content": "The fundamental design decision is this: cancellation is a state transition, not a destructive operation.\n\nA tenant moves through states over its lifetime:\nTRIAL → ACTIVE → SUSPENDED → CANCELLED → ARCHIVED → DELETED\n\nAt each state boundary, specific actions are taken — but data is never destroyed until the DELETED state, which requires explicit customer request or the expiry of the contractual retention period.\n\nThis design means every state is reversible with the right business trigger: CANCELLED → ACTIVE on reactivation, SUSPENDED → ACTIVE on payment, ARCHIVED → ACTIVE on a reactivation request within the retention window."
+          },
+          {
+            "type": "architecture-block",
+            "heading": "Cancellation & Reactivation Flow",
+            "content": "  CANCELLATION FLOW\n  ─────────────────────────────────────────\n  Client confirms cancellation\n              │\n              ▼\n  Subscription Orchestrator\n  ┌─────────────────────────────────────┐\n  │  1. Tenant state → CANCELLED        │\n  │     cancelledAt: timestamp          │\n  │     retainUntil: +12 months         │\n  │                                     │\n  │  2. Billing Service                 │\n  │     → Cancel recurring charges      │\n  │     → Issue prorated refund if any  │\n  │     → Retain invoice history        │\n  │                                     │\n  │  3. Feature Flag Service            │\n  │     → All features: DISABLED        │\n  │     → Login: BLOCKED                │\n  │     → Data: READ-ONLY for 30 days   │\n  │       (data export window)          │\n  │                                     │\n  │  4. User Service                    │\n  │     → All users: DEACTIVATED        │\n  │     → Credentials: RETAINED         │\n  │     → Permissions: RETAINED         │\n  │                                     │\n  │  5. Job Scheduler                   │\n  │     → All scheduled jobs: PAUSED    │\n  │     → Job definitions: RETAINED     │\n  │                                     │\n  │  6. Integration Service             │\n  │     → All webhooks: DISABLED        │\n  │     → OAuth tokens: REVOKED         │\n  │     → Integration config: RETAINED  │\n  │                                     │\n  │  7. Notification Service            │\n  │     → Send cancellation confirm     │\n  │     → Send data export instructions │\n  │     → Schedule 30-day data warning  │\n  │     → Schedule 11-month warning     │\n  └─────────────────────────────────────┘\n\n  DATA RETAINED IN-PLACE (soft-deleted):\n  → All tenant records with tenantState: CANCELLED\n  → All users, deactivated but intact\n  → All data, configurations, templates\n  → All audit logs and history\n  → All job definitions and schedules\n  → All integration configurations\n\n  REACTIVATION FLOW (6 months later)\n  ─────────────────────────────────────────\n  Sales team triggers: POST /admin/tenants/{id}/reactivate\n              │\n              ▼\n  Subscription Orchestrator\n  ┌─────────────────────────────────────┐\n  │  1. Validate retainUntil > today    │\n  │     (still within retention window) │\n  │                                     │\n  │  2. Billing Service                 │\n  │     → Create new subscription       │\n  │     → Charge first invoice          │\n  │     → Restore payment method or     │\n  │       prompt for new card           │\n  │                                     │\n  │  3. Tenant state → ACTIVE           │\n  │                                     │\n  │  4. Feature Flag Service            │\n  │     → Restore plan entitlements     │\n  │     → Login: ENABLED                │\n  │                                     │\n  │  5. User Service                    │\n  │     → All users: REACTIVATED        │\n  │     → Credentials valid immediately │\n  │                                     │\n  │  6. Job Scheduler                   │\n  │     → Resume all paused jobs        │\n  │     → Recalculate next run times    │\n  │                                     │\n  │  7. Integration Service             │\n  │     → Webhooks: ENABLED             │\n  │     → Prompt re-authorisation for   │\n  │       expired OAuth tokens only     │\n  │                                     │\n  │  8. Notification Service            │\n  │     → Welcome back email to admin   │\n  │     → Notify all reactivated users  │\n  └─────────────────────────────────────┘\n              │\n              ▼\n  Client logs in. Sees exactly what\n  they left 6 months ago. < 5 minutes\n  total reactivation time."
+          },
+          {
+            "type": "key-principles",
+            "heading": "Key Principles",
+            "items": [
+              "Cancellation is a state machine transition — never a deletion event. Data lives in-place under tenantState: CANCELLED",
+              "Offer a 30-day data export window post-cancellation — clients can download their data before access is fully cut off. This is also a GDPR right-to-portability requirement",
+              "Retain job definitions and schedules — reactivated clients should not have to rebuild their automation from scratch",
+              "Integration configs are retained but OAuth tokens are revoked at cancellation — security requirement. On reactivation, re-authorisation is a single click, not a full reconfiguration",
+              "Schedule an automated 11-month warning to the client: their data will be deleted in 30 days. This is both a courtesy and a reactivation sales opportunity",
+              "Reactivation must be triggerable by the sales team without engineering involvement — a self-serve admin action, not a deployment or migration task"
+            ]
+          },
+          {
+            "type": "warning",
+            "heading": "The Infrastructure Cost of Retention",
+            "content": "Retaining live database records for thousands of cancelled tenants for 12 months has a real infrastructure cost. The naive approach — keeping everything in the primary hot database — becomes expensive and slow as cancelled tenant data accumulates.\n\nThe correct approach is tiered storage: after 30 days in CANCELLED state (the data export window), tenant data is moved from the hot SQL Server primary to an Azure SQL serverless tier or Azure Table Storage for the remaining 11 months. The data is still queryable and reactivation-ready, but at a fraction of the cost. The tenant state record in the primary DB retains a pointer to the cold storage location. This is transparent to the reactivation flow — the orchestrator handles the restore from cold storage automatically."
+          },
+          {
+            "type": "tradeoffs",
+            "heading": "Trade-offs",
+            "pros": [
+              "Reactivation is fully automated and self-serve — no professional services, no engineering involvement, no waiting",
+              "Client returns to exactly their previous state — all data, users, jobs, and configs intact. This is a powerful retention and win-back sales argument",
+              "Soft-delete state model simplifies compliance — data retention periods are explicit, auditable, and automatically enforced",
+              "Tiered storage after the export window makes 12-month retention economically viable at scale"
+            ],
+            "cons": [
+              "Soft-delete adds tenantState filter to every query across the entire platform — a missing filter is a data leak risk",
+              "Tiered storage introduces restore latency on reactivation for very large tenants — set expectations with a progress indicator rather than a synchronous wait",
+              "Paused jobs need careful next-run-time recalculation on reactivation — a job scheduled for daily at 9am that was paused for 6 months needs its schedule rebuilt, not blindly resumed"
+            ]
+          }
+        ],
+        "oneLineSummary": "Design cancellation as a reversible state transition from day one — the 5-minute automated reactivation that wins back a customer six months later is only possible if you never deleted their data in the first place."
+      }
+    }
+  ],
+
+  "scoreCard": {
+    "maxScore": 30,
+    "bands": [
+      {
+        "min": 27,
+        "max": 30,
+        "label": "Production-Ready Thinking",
+        "color": "green",
+        "message": "You demonstrated distributed systems depth on the Saga pattern, product thinking on downgrade grace periods, and forward-thinking design on reactivation. This is how senior engineers build systems that last."
+      },
+      {
+        "min": 18,
+        "max": 26,
+        "label": "Strong Foundation, Sharpen the Edges",
+        "color": "yellow",
+        "message": "Good instincts across billing lifecycle design. Deepen your understanding of compensating transactions, entitlement separation from billing, and soft-delete state machine design. The gaps are in the production details."
+      },
+      {
+        "min": 0,
+        "max": 17,
+        "label": "Needs Deeper Preparation",
+        "color": "red",
+        "message": "Revisit the Saga pattern and compensating transactions, feature flag driven entitlement models, and soft-delete architecture. Focus on thinking about state transitions rather than CRUD operations — mature SaaS systems are state machines, not databases with API wrappers."
+      }
+    ]
+  }
+}

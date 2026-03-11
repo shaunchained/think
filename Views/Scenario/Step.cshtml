@@ -1,0 +1,109 @@
+@model thinking1.Models.ScenarioStep
+@{
+    ViewData["Title"] = $"Question {ViewBag.StepNumber} — {ViewBag.ScenarioTitle}";
+    int stepNumber   = (int)ViewBag.StepNumber;
+    int totalSteps   = (int)ViewBag.TotalSteps;
+    string scenarioId    = (string)ViewBag.ScenarioId;
+    string scenarioTitle = (string)ViewBag.ScenarioTitle;
+    string scenarioType  = (string)ViewBag.ScenarioType;
+    string nextUrl       = (string)ViewBag.NextUrl;
+    bool isLastStep      = (bool)ViewBag.IsLastStep;
+    double progressPercent = (double)stepNumber / totalSteps * 100;
+}
+
+<!-- PROGRESS BAR — sticky, always visible -->
+<div class="progress-bar-wrapper">
+    <div class="container">
+        <div class="d-flex justify-content-between align-items-center mb-1">
+            <span class="progress-label">Question @stepNumber of @totalSteps</span>
+            <span class="progress-label">@scenarioType</span>
+        </div>
+        <div class="progress progress-track">
+            <div class="progress-fill"
+                 id="progressFill"
+                 style="width: 0%"
+                 data-target="@progressPercent.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)%">
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="step-page">
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-lg-8">
+
+                <!-- SCENARIO CONTEXT -->
+                <div class="scenario-context mb-4">
+                    <div class="context-header">
+                        <span class="context-type-badge">@scenarioType</span>
+                        <h1 class="context-title">@scenarioTitle</h1>
+                    </div>
+                    <p class="situation-text">@Model.Situation</p>
+
+                    @if (Model.Logs != null && Model.Logs.Count > 0)
+                    {
+                        <div class="log-block">
+                            @foreach (var log in Model.Logs)
+                            {
+                                var parts    = log.Split('|', 2);
+                                var level    = parts.Length > 0 ? parts[0].Trim() : "INFO";
+                                var message  = parts.Length > 1 ? parts[1] : log;
+                                var logClass = level switch
+                                {
+                                    "ERROR" => "log-error",
+                                    "WARN"  => "log-warn",
+                                    _       => "log-info"
+                                };
+                                <div class="log-line @logClass">
+                                    <span class="log-level">@level</span>
+                                    <span class="log-message">@message</span>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+
+                <!-- QUESTION -->
+                <div class="question-block mb-4">
+                    <h2 class="question-text">@Model.Question</h2>
+                </div>
+
+                <!-- OPTIONS -->
+                <div class="options-block" id="optionsBlock">
+                    @for (int i = 0; i < Model.Options.Count; i++)
+                    {
+                        var opt = Model.Options[i];
+                        <button class="option-btn"
+                                data-index="@i"
+                                data-scenario-id="@scenarioId"
+                                data-step-number="@stepNumber"
+                                onclick="submitAnswer(this)">
+                            <span class="option-key">@opt.Key</span>
+                            <span class="option-text">@opt.Text</span>
+                        </button>
+                    }
+                </div>
+
+                <!-- FEEDBACK — revealed by JS after AJAX response -->
+                <div class="feedback-block" id="feedbackBlock" style="display:none">
+                    <div class="explanation-block" id="explanationBlock"></div>
+                    <blockquote class="senior-quote" id="seniorQuote" style="display:none"></blockquote>
+                    <!-- href is set by JS from the AJAX response nextUrl field -->
+                    <a href="#" class="btn btn-next" id="nextBtn">
+                        @if (isLastStep)
+                        {
+                            <span>See Your Score</span>
+                        }
+                        else
+                        {
+                            <span>Next Question</span>
+                        }
+                        <span class="next-arrow">→</span>
+                    </a>
+                </div>
+
+            </div>
+        </div>
+    </div>
+</div>

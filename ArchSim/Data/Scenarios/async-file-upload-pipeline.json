@@ -1,0 +1,294 @@
+{
+  "id": "async-file-upload-pipeline",
+  "title": "Async File Upload & Processing Pipeline",
+  "category": "API Design & Async Architecture",
+  "difficulty": "3-5 yrs",
+  "sequence": 2,
+  "estimatedMinutes": 5,
+  "description": "A SaaS platform lets users upload large files — CSVs, PDFs, images — which then get processed: virus scanned, parsed, thumbnail generated, and stored. Navigate the three hardest design decisions in building this reliably at scale.",
+  "tags": [ "File Upload", "Async Processing", "Azure Blob Storage", "Service Bus", "Idempotency", "Job Tracking" ],
+
+  "interviewer": {
+    "name": "Aisha Malik",
+    "role": "Senior Software Engineer, Platform Team",
+    "avatar": "AM"
+  },
+
+  "steps": [
+    {
+      "stepNumber": 1,
+      "interviewerSays": "We need to let users upload files up to 500MB — CSVs, PDFs, and images. Your first instinct might be to accept the file in a POST request to your API, save it, and return a success response. Why might that be a problem, and how would you redesign the upload flow?",
+      "context": "This tests whether the engineer understands why large file uploads should never go through the API server. The correct answer introduces presigned URLs — a pattern used by AWS S3, Azure Blob Storage, and every major storage provider. Many 3-5 year engineers have used this pattern but cannot explain why it exists.",
+      "type": "single-choice",
+      "options": [
+        {
+          "id": "A",
+          "text": "Large files slow the API response time, so we should increase the request timeout to 5 minutes and stream the file through the API server to blob storage — this handles 500MB transfers without changing the upload flow",
+          "score": 2,
+          "tag": "Treats the Symptom",
+          "tagColor": "orange",
+          "interviewerReaction": "Increasing timeouts treats the symptom not the cause. Every concurrent upload still holds an open connection, consumes memory, and routes all bytes through your server — with 100 simultaneous uploads you are holding 50GB in flight through your API tier. What if your server was not involved in the file transfer at all?"
+        },
+        {
+          "id": "B",
+          "text": "Streaming 500MB through the API server holds connections open, consumes memory, and does not scale — instead the API should generate a short-lived presigned URL and return it to the client, who uploads directly to Azure Blob Storage, keeping every file byte completely out of the API server",
+          "score": 10,
+          "tag": "Excellent",
+          "tagColor": "green",
+          "interviewerReaction": "Exactly right — you identified the problem and the solution together. The API issues a signed permission token and steps aside entirely. Now the file is in blob storage — how do you trigger and track the processing pipeline that needs to run on it?"
+        },
+        {
+          "id": "C",
+          "text": "The API POST approach has memory problems at 500MB, so we should chunk the file on the client into 10MB pieces and POST each chunk separately to the API — this reduces per-request memory pressure and lets us reassemble on the server",
+          "score": 4,
+          "tag": "Reduces but Does Not Solve",
+          "tagColor": "yellow",
+          "interviewerReaction": "Chunking reduces per-request memory pressure but your API server still handles every byte of every chunk from every concurrent upload. With 100 simultaneous uploads you are still routing 50GB through your API tier — just in smaller pieces. The server is still the bottleneck. What if no chunks went through your server at all?"
+        }
+      ],
+      "idealAnswer": {
+        "summary": "Large file uploads must never travel through your API server. Presigned URLs delegate the upload directly from the client to blob storage — your API server issues a signed permission token and steps aside. This eliminates connection holding, memory pressure, and network egress costs from your API tier entirely.",
+        "sections": [
+          {
+            "type": "text",
+            "heading": "Why Streaming Through Your API Server Fails at Scale",
+            "content": "When a 500MB file upload travels through your API server, three things happen simultaneously:\n\n1. One HTTP connection is held open for the entire upload duration — potentially minutes on a slow connection. With 100 concurrent uploads, that is 100 long-held connections consuming threads or async handlers.\n\n2. The file bytes pass through your server's memory, even when streaming. At scale this creates memory pressure that competes with your actual application logic.\n\n3. Your server pays network ingress and egress costs twice — once receiving from the client, once sending to blob storage.\n\nPresigned URLs solve all three by removing your server from the data path entirely. Your server only handles the lightweight token issuance — a millisecond operation — while the heavy file transfer happens directly between the client and Azure Blob Storage over a connection your server never touches."
+          },
+          {
+            "type": "architecture-block",
+            "heading": "Presigned URL Upload Flow",
+            "content": "  WRONG WAY (file travels through API)\n  ──────────────────────────────────────\n  Client ──500MB──► API Server ──500MB──► Blob Storage\n                    (bottleneck)\n\n  RIGHT WAY (presigned URL)\n  ──────────────────────────────────────\n\n  STEP 1 — Client requests upload permission\n  Client ──POST /files/upload-url──► API Server\n  Body: { filename: 'report.csv', size: 524288000 }\n\n  STEP 2 — API generates presigned URL\n  API Server:\n  → Validate user is authenticated\n  → Validate file type is allowed\n  → Validate file size is within limit\n  → Generate unique file ID: uuid-1234\n  → Create pending record in DB:\n    { id: uuid-1234, status: PENDING_UPLOAD,\n      userId: u-99, filename: report.csv }\n  → Call Azure Blob Storage SDK:\n    Generate SAS URL for blob: uploads/uuid-1234\n    Expiry: 15 minutes\n    Permissions: write only\n  → Return to client:\n    { fileId: uuid-1234,\n      uploadUrl: https://storage.blob.core.windows.net/\n                 uploads/uuid-1234?sv=...&sig=...&se=...,\n      expiresAt: 2024-03-10T14:45:00Z }\n\n  STEP 3 — Client uploads directly to blob storage\n  Client ──500MB──► Azure Blob Storage\n  (API server not involved — zero bytes through API)\n\n  STEP 4 — Client notifies API that upload is complete\n  Client ──POST /files/uuid-1234/complete──► API Server\n  → API updates DB: status: UPLOADED\n  → API triggers processing pipeline\n  → API returns: { fileId: uuid-1234,\n                   status: PROCESSING }"
+          },
+          {
+            "type": "key-principles",
+            "heading": "Key Principles",
+            "items": [
+              "Presigned URL expiry should match expected upload time plus a buffer — 15 minutes for a 500MB file on a slow connection is reasonable",
+              "Permissions on the presigned URL must be write-only — the client should not be able to read other users' uploads from the same URL pattern",
+              "Create the pending DB record before issuing the URL — if the client never completes the upload, you have a record to clean up with a scheduled job",
+              "Validate file type and size at URL generation time, not just at processing time — reject disallowed file types before the client wastes time uploading 500MB",
+              "Blob storage path should include the fileId, not the original filename — original filenames are user input and must never be used directly as storage paths"
+            ]
+          },
+          {
+            "type": "warning",
+            "heading": "The Completion Notification Gap",
+            "content": "A common mistake is relying solely on the client calling POST /files/{id}/complete to trigger processing. If the client crashes, closes the browser, or loses connectivity after the upload completes but before sending the completion notification, your system has a file sitting in blob storage with status: PENDING_UPLOAD forever.\n\nThe fix: configure an Azure Blob Storage event trigger — when a blob is written to the uploads container, Azure Event Grid automatically fires an event to your API. Use this as the authoritative completion signal, with the client notification as a fast-path optimisation. Never rely on client-side callbacks as the only trigger for server-side state transitions."
+          },
+          {
+            "type": "tradeoffs",
+            "heading": "Trade-offs",
+            "pros": [
+              "API server is completely out of the data path — no memory pressure, no connection holding, no egress costs",
+              "Azure Blob Storage handles upload reliability natively — resumable uploads, automatic retry on network interruption",
+              "Scales to thousands of concurrent uploads without any API server scaling",
+              "Write-only presigned URL means a leaked URL cannot be used to read other data"
+            ],
+            "cons": [
+              "Two-step flow (get URL, then notify completion) adds client-side complexity compared to a simple POST",
+              "Presigned URL expiry must be tuned carefully — too short and slow connections fail, too long and a stolen URL is valid longer than acceptable",
+              "Client completion notification is unreliable — requires blob storage event trigger as a safety net"
+            ]
+          }
+        ],
+        "oneLineSummary": "Large file uploads should never travel through your API server — presigned URLs let clients upload directly to blob storage while your API only handles the lightweight permission issuance."
+      }
+    },
+    {
+      "stepNumber": 2,
+      "interviewerSays": "Good. The file is now in blob storage. We need to run three processing steps on it: a virus scan, content parsing to extract structured data, and thumbnail generation for image files. Each step takes between 5 and 90 seconds. How do you design the processing pipeline, and how does the user know what is happening with their file?",
+      "context": "This tests whether the engineer understands why long-running work must be async, how to model job status, and how to communicate progress back to the user without polling hammering the server. Many mid-level engineers make the processing synchronous and wonder why their API times out.",
+      "type": "single-choice",
+      "options": [
+        {
+          "id": "A",
+          "text": "Run all three processing steps synchronously in the API request thread when the completion notification arrives — return the result when all steps finish",
+          "score": 1,
+          "tag": "Will Time Out",
+          "tagColor": "orange",
+          "interviewerReaction": "A 90-second synchronous operation in an API request will hit HTTP timeout limits, consume a thread for the entire duration, and give the user no feedback during processing. If the server restarts mid-processing, the work is lost entirely. How do you move this work outside the request thread?"
+        },
+        {
+          "id": "B",
+          "text": "On completion notification, publish a message to a queue, return 202 Accepted to the client immediately, have background worker pods consume the queue and process the file, update a status record in the database after each step, and let the client poll GET /files/{id}/status to track progress",
+          "score": 10,
+          "tag": "Excellent",
+          "tagColor": "green",
+          "interviewerReaction": "Exactly right. Async queue decouples upload from processing, 202 gives the user immediate feedback, and status polling keeps them informed without blocking the API. One follow-up — what happens if the virus scan fails? Does content parsing still run?"
+        },
+        {
+          "id": "C",
+          "text": "Run the processing in a background thread on the API server using Task.Run, update the database when complete, and send the user an email notification when processing finishes",
+          "score": 4,
+          "tag": "Fragile",
+          "tagColor": "yellow",
+          "interviewerReaction": "Background threads on the API server are lost if the pod restarts — you have no durability guarantee. If processing takes 90 seconds and the pod is redeployed mid-processing, the work silently disappears. How do you make the processing durable and survivable across pod restarts?"
+        }
+      ],
+      "idealAnswer": {
+        "summary": "Long-running file processing must be fully asynchronous — decoupled from the API request, durable across pod restarts, and observable through a status model. A message queue with dedicated worker pods is the correct architecture. The API returns 202 Accepted immediately and the client polls for status updates.",
+        "sections": [
+          {
+            "type": "text",
+            "heading": "Why Async Processing is Non-Negotiable Here",
+            "content": "Processing a 500MB file involves three operations totalling up to 90 seconds. Running this synchronously creates three compounding problems:\n\n1. HTTP timeout: most clients and load balancers timeout at 30-60 seconds. A 90-second operation will be killed mid-way.\n\n2. Thread starvation: each synchronous processing job holds a thread on your API server. With 50 concurrent uploads all processing simultaneously, your API server is unresponsive to every other request.\n\n3. No durability: if the server restarts during processing — deployment, crash, scaling event — the work is silently lost with no way to recover.\n\nThe solution is to treat file processing as a job, not a request. The API acknowledges receipt immediately (202 Accepted) and hands the work to a durable queue. Worker pods consume jobs independently and update status as they progress."
+          },
+          {
+            "type": "architecture-block",
+            "heading": "Async Processing Pipeline",
+            "content": "  Blob Storage event fires: file uploaded\n               │\n               ▼\n         API Server\n         → Update DB: status: QUEUED\n         → Publish to Service Bus:\n           { fileId: uuid-1234,\n             userId: u-99,\n             blobPath: uploads/uuid-1234,\n             steps: [VIRUS_SCAN,\n                     CONTENT_PARSE,\n                     THUMBNAIL_GEN] }\n         → Return 202 to client (if via client notify)\n               │\n               ▼\n      Azure Service Bus Queue\n      file-processing-jobs\n               │\n               ▼\n       Worker Pod (auto-scaling)\n               │\n    ┌──────────▼──────────────────────┐\n    │  STEP 1: VIRUS SCAN             │\n    │  → Update DB: status: SCANNING  │\n    │  → Run virus scan               │\n    │  → Clean: proceed to step 2     │\n    │  → Infected: update status:     │\n    │    REJECTED, delete blob,       │\n    │    notify user, STOP            │\n    └──────────┬──────────────────────┘\n               │ clean\n    ┌──────────▼──────────────────────┐\n    │  STEP 2: CONTENT PARSING        │\n    │  → Update DB: status: PARSING   │\n    │  → Parse CSV/PDF structure      │\n    │  → Store extracted data in DB   │\n    │  → Update DB: status: PARSED    │\n    └──────────┬──────────────────────┘\n               │\n    ┌──────────▼──────────────────────┐\n    │  STEP 3: THUMBNAIL GENERATION   │\n    │  → Update DB: status: PROCESSING│\n    │  → Generate thumbnail if image  │\n    │  → Upload thumbnail to blob     │\n    │  → Update DB: status: COMPLETE, │\n    │    thumbnailUrl: ...,           │\n    │    processedAt: timestamp       │\n    └─────────────────────────────────┘\n\n  CLIENT POLLING:\n  GET /files/uuid-1234/status\n  Response:\n  {\n    fileId: uuid-1234,\n    status: PARSING,        ← current step\n    progress: 40,           ← percent complete\n    steps: [\n      { name: VIRUS_SCAN,   state: COMPLETE },\n      { name: CONTENT_PARSE,state: IN_PROGRESS },\n      { name: THUMBNAIL_GEN,state: PENDING }\n    ],\n    startedAt: ...,\n    estimatedCompletion: ...\n  }"
+          },
+          {
+            "type": "key-principles",
+            "heading": "Key Principles",
+            "items": [
+              "Return 202 Accepted immediately — never make the user wait for async work to complete before acknowledging their request",
+              "Update the status record in the DB before starting each step, not after — if the worker crashes mid-step, the status accurately reflects where processing stopped",
+              "Virus scan must always be the first step — never parse or store content from an unscanned file",
+              "Worker pods must be stateless — all state lives in the DB and blob storage, so any pod can pick up any job",
+              "Set a message lock timeout on Service Bus equal to the maximum expected processing time — if a worker crashes, the message becomes visible again and another pod picks it up automatically"
+            ]
+          },
+          {
+            "type": "warning",
+            "heading": "The Polling Frequency Trap",
+            "content": "If the client polls GET /files/{id}/status every second for a 90-second job, that is 90 API calls per file per user. With 1,000 concurrent uploads in progress, that is 1,000 status calls per second — a significant load generated entirely by waiting, not by actual user actions.\n\nThree ways to manage this: exponential backoff polling (poll at 1s, 2s, 4s, 8s intervals), a maximum poll interval cap of 5 seconds, or replacing polling entirely with a WebSocket or Server-Sent Events connection that pushes status updates to the client as they happen. For a 3-5 year engineer, polling with exponential backoff is the right answer. WebSocket push is the senior optimisation."
+          },
+          {
+            "type": "tradeoffs",
+            "heading": "Trade-offs",
+            "pros": [
+              "Processing is durable — a pod restart or deployment during processing does not lose work, the message is requeued automatically",
+              "Worker pods scale independently of the API — burst upload periods scale workers without scaling the API tier",
+              "Step-by-step status gives users meaningful progress feedback, not just a spinner",
+              "Virus scan failure path is clean — infected files are rejected and deleted before any content is parsed or stored"
+            ],
+            "cons": [
+              "More moving parts than synchronous processing — Service Bus, worker pods, and status DB all need to be operational",
+              "Client must implement polling logic — adds frontend complexity",
+              "Processing order dependencies (virus scan before parse) must be explicitly enforced — a queue does not know about step ordering"
+            ]
+          }
+        ],
+        "oneLineSummary": "Any operation taking more than a few seconds belongs in an async queue with a status model — never hold an HTTP connection open for work that could survive a pod restart."
+      }
+    },
+    {
+      "stepNumber": 3,
+      "interviewerSays": "Good pipeline design. Now a reliability problem. A user uploads the same CSV file twice — maybe they got impatient and clicked upload again, or their client retried after a network hiccup. Your worker picks up both processing jobs and runs them concurrently. What problems does this cause, and how do you design the system to handle duplicate processing safely?",
+      "context": "This is the idempotency problem. It is one of the most important concepts in distributed systems and one of the least understood by mid-level engineers. They know what idempotency means in HTTP (GET is idempotent, POST is not) but most have never had to design for it in a processing pipeline.",
+      "type": "single-choice",
+      "options": [
+        {
+          "id": "A",
+          "text": "Add a unique constraint on the filename in the database — if the same filename is uploaded twice, reject the second upload with a 409 Conflict error",
+          "score": 3,
+          "tag": "Too Blunt",
+          "tagColor": "yellow",
+          "interviewerReaction": "Filename uniqueness is too restrictive — users legitimately upload files with the same name, like a monthly report called 'summary.csv'. And this does not solve the case where the same file bytes are uploaded twice under different names. How do you detect true duplicates — same content — rather than same filename?"
+        },
+        {
+          "id": "B",
+          "text": "The problem is that filename is not a reliable identity for file content — two uploads of identical bytes under different names will both process. The fix is to hash the file bytes to get a content fingerprint, check for an existing processed result with that hash, and if found skip processing entirely and link the new upload to the existing result",
+          "score": 10,
+          "tag": "Excellent",
+          "tagColor": "green",
+          "interviewerReaction": "Exactly right — you named the real problem first, which is that filename uniqueness is the wrong identity for duplicate detection, then gave the correct solution. How do you handle the race condition where two workers compute the same hash at exactly the same moment and both try to claim processing?"
+        },
+        {
+          "id": "C",
+          "text": "Let both jobs process concurrently — the second one to complete will overwrite the first result in the database. Use the latest result as the canonical processed output",
+          "score": 2,
+          "tag": "Race Condition",
+          "tagColor": "orange",
+          "interviewerReaction": "Last-write-wins creates a race condition where two workers are simultaneously writing results to the database, partially overwriting each other's output. The final state is unpredictable and potentially corrupt. How do you prevent two workers from processing the same file at the same time?"
+        }
+      ],
+      "idealAnswer": {
+        "summary": "Duplicate file processing is solved with two complementary mechanisms: a content hash that detects identical files regardless of filename, and an optimistic lock or database unique constraint on the processing job that prevents two workers from processing the same content simultaneously. Together these make the processing pipeline idempotent.",
+        "sections": [
+          {
+            "type": "text",
+            "heading": "What Idempotency Means in a Processing Pipeline",
+            "content": "An idempotent operation produces the same result whether it runs once or ten times. In a file processing pipeline, idempotency means: processing the same file content twice should produce exactly the same output as processing it once — and should not create duplicate records, duplicate thumbnails, or duplicate extracted data.\n\nThis matters because in distributed systems, duplicate processing is not an edge case — it is a normal operating condition. Networks drop connections. Clients retry. Message queues redeliver messages when workers crash. A processing pipeline that cannot handle duplicates safely will corrupt data in production eventually."
+          },
+          {
+            "type": "architecture-block",
+            "heading": "Idempotent Processing Design",
+            "content": "  FILE UPLOAD COMPLETE\n               │\n               ▼\n  STEP 1: GENERATE CONTENT HASH\n  Worker downloads file from blob storage\n  Computes SHA-256 hash of file bytes\n  contentHash: a3f8c2d1...\n               │\n               ▼\n  STEP 2: CHECK FOR EXISTING RESULT\n  SELECT * FROM processed_files\n  WHERE contentHash = 'a3f8c2d1...'\n  AND userId = 'u-99'\n               │\n        ┌──────┴──────┐\n        │ FOUND       │ NOT FOUND\n        ▼             ▼\n  Link new      Attempt to claim\n  upload record  processing lock:\n  to existing   ─────────────────\n  result.        INSERT INTO\n  Skip           processing_locks\n  processing.    (contentHash,\n  Status:        workerId,\n  COMPLETE       lockedAt)\n  immediately.   WHERE NOT EXISTS\n                 (same contentHash)\n                    │\n             ┌──────┴──────┐\n             │ LOCK WON    │ LOCK LOST\n             ▼             ▼\n        Process        Another worker\n        the file       has the lock.\n        normally.      Poll until\n             │         complete,\n             ▼         then link\n        Release        to their\n        lock.          result.\n        Store result\n        with contentHash.\n\n  DATABASE SCHEMA ADDITIONS:\n  ┌─────────────────────────────────────┐\n  │  file_uploads                       │\n  │  ─────────────────────────────────  │\n  │  id            UUID PRIMARY KEY     │\n  │  userId        UUID                 │\n  │  filename      VARCHAR              │\n  │  contentHash   VARCHAR(64)          │  ← SHA-256\n  │  status        ENUM                 │\n  │  resultId      UUID NULLABLE        │  ← links to result\n  │                                     │\n  │  processing_locks                   │\n  │  ─────────────────────────────────  │\n  │  contentHash   VARCHAR UNIQUE       │  ← prevents race\n  │  workerId      VARCHAR              │\n  │  lockedAt      DATETIME             │\n  │  expiresAt     DATETIME             │  ← stale lock cleanup\n  └─────────────────────────────────────┘"
+          },
+          {
+            "type": "key-principles",
+            "heading": "Key Principles",
+            "items": [
+              "Use SHA-256 for content hashing — fast enough for files up to 500MB and collision-resistant for practical purposes",
+              "Hash the file bytes, not the filename — same content with different filename is still a duplicate",
+              "The UNIQUE constraint on processing_locks.contentHash is your race condition protection — the database enforces that only one worker can claim a lock, not application code",
+              "Processing locks must have an expiry time — if the worker that claimed the lock crashes, the lock must expire and become available for another worker after a reasonable timeout",
+              "Scope duplicate detection to the user — user A and user B uploading the same file should process independently, not share results across account boundaries"
+            ]
+          },
+          {
+            "type": "warning",
+            "heading": "Do Not Hash Inside the API Request",
+            "content": "A common mistake is computing the content hash in the API server when the completion notification arrives — before queueing the processing job. This requires downloading the file from blob storage into the API server just to hash it, which reintroduces the same memory and network problems that presigned URLs solved.\n\nThe correct place to compute the hash is inside the worker, as the first step of processing — the worker is already downloading the file to process it, so hashing happens as part of the same read pass. No extra download, no extra memory pressure on the API tier."
+          },
+          {
+            "type": "tradeoffs",
+            "heading": "Trade-offs",
+            "pros": [
+              "Content hashing detects true duplicates regardless of filename, upload time, or which client submitted them",
+              "Database-level unique constraint on the lock prevents race conditions without distributed locking infrastructure",
+              "Duplicate uploads complete instantly for the second requester — they get the result from the first processing run immediately",
+              "Lock expiry prevents stale locks from blocking processing permanently after worker failures"
+            ],
+            "cons": [
+              "SHA-256 hashing a 500MB file adds processing time — typically 1-3 seconds on modern hardware, acceptable as the first step of a 90-second pipeline",
+              "Sharing results across duplicate uploads requires careful data modelling — the result record must be associated with the user, not just the hash",
+              "Lock expiry timeout must be tuned carefully — too short and you get spurious re-processing, too long and crashed workers block processing for an unacceptable time"
+            ]
+          }
+        ],
+        "oneLineSummary": "Idempotency in a processing pipeline means the same input always produces the same output regardless of how many times it runs — content hashing detects duplicates and database-level locks prevent concurrent processing of identical content."
+      }
+    }
+  ],
+
+  "scoreCard": {
+    "maxScore": 30,
+    "bands": [
+      {
+        "min": 27,
+        "max": 30,
+        "label": "Strong Mid-Level Engineer",
+        "color": "green",
+        "message": "You demonstrated strong systems thinking across all three problems — presigned URL architecture, async pipeline design, and idempotency. These are the patterns that separate engineers who build reliable systems from engineers who build systems that work in development but fail in production."
+      },
+      {
+        "min": 18,
+        "max": 26,
+        "label": "Good Foundation, Production Gaps",
+        "color": "yellow",
+        "message": "Solid instincts but gaps in production reliability thinking. Focus on async processing patterns, message queue durability, and idempotency design. These topics come up in every senior engineering interview and every production incident post-mortem."
+      },
+      {
+        "min": 0,
+        "max": 17,
+        "label": "Core Concepts to Strengthen",
+        "color": "red",
+        "message": "Revisit presigned URL upload patterns, async job queue architecture with status tracking, and the concept of idempotency in distributed systems. Build a small file processing pipeline as a side project — these concepts click much faster when you have implemented them once end to end."
+      }
+    ]
+  },
+  "postRead": {
+    "title": "Some Concepts from This Scenario",
+    "intro": "",
+    "sections": [
+      {
+        "type": "text",
+        "heading": "Idempotency - Simply Explained ",
+        "content": "Think about a lift button. You press the button to call the lift. It lights up. Now you press it again. And again. And again — because the lift is taking too long. What happens? Nothing extra. The lift still comes once. Pressing the button ten times produces exactly the same result as pressing it once. One lift. One arrival. No matter how many times you pressed.\n\nThat is idempotency. An operation that can be performed multiple times and always produces the same result as if it was performed once. No extra side effects. No duplicate outcomes. Press ten times, get one lift.\n\nNow think about why this matters in software. Your application sends a request to a server — place this order, process this payment, create this user. The server receives the request, processes it, and just as it is about to send the response back — the network drops. Your application never receives the response. It has no idea if the request succeeded or failed. So it does the only sensible thing. It tries again.\n\nHere is the problem. If your server is not idempotent, that retry just created a second order. Charged the customer twice. Created two user accounts. The original request succeeded — the customer just never found out. The retry then succeeded again. Now you have a very angry customer and a very embarrassing support ticket.\n\nAn idempotent server handles this gracefully. When the retry arrives, the server recognises it as a duplicate of a request it already processed. It does not process it again. It simply returns the same response as the first time. One order. One charge. One user account. Regardless of how many times the client retried.\n\nThe way this is implemented is straightforward. The client generates a unique ID for each request — called an idempotency key — before sending it. Something like a UUID. It sends this key along with the request. The server stores the key and the result of processing that request. When the retry arrives with the same key, the server looks it up, finds it has already been processed, and returns the stored result without doing anything twice.\n\nThe operations you use every day are already designed around this. GET requests are idempotent — asking for a webpage ten times returns the same webpage ten times, nothing changes on the server. DELETE requests are idempotent — deleting something that is already deleted simply returns success, nothing explodes. POST requests are not idempotent by default — submitting a form ten times creates ten records. Making POST requests idempotent is your responsibility as the engineer, and idempotency keys are how you do it.\n\nIdempotency is not a nice-to-have. In a world where networks drop, servers restart, and clients retry — and they always do — an API without idempotency is an API that silently corrupts data under pressure. You will never see the problem in development. You will absolutely see it in production, at three in the morning, when a customer has been charged six times for one order."
+      }
+    ]
+  }
+}

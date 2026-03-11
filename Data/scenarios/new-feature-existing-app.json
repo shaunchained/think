@@ -1,0 +1,239 @@
+{
+  "id": "new-feature-existing-app",
+  "title": "New feature. Existing app. Everything could break.",
+  "description": "A new loyalty points module needs to go live in 5 days. It touches the order service, payment flow, and user accounts. Nobody fully knows the blast radius.",
+  "type": "Feature Delivery",
+  "difficulty": "Senior",
+  "estimatedMinutes": 6,
+  "isAvailable": true,
+  "sequence": 5,
+  "steps": [
+    {
+      "stepNumber": 1,
+      "situation": "It is Monday morning. The product manager confirms that the new Loyalty Points feature must go live this Friday. The feature has been built over the past three weeks by two developers. It adds a points calculation engine that hooks into the Order Service at checkout, deducts or credits points from the User Account Service, and logs every transaction to a new LoyaltyLedger table. The existing Order Service processes 12,000 transactions per day in production. No one has mapped exactly which existing code paths the new hooks touch. You are the senior engineer responsible for delivery.",
+      "logs": [],
+      "question": "First thing Monday morning — before any testing begins — what is the most important thing you do?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Ask the two developers to start writing test cases immediately. Time is short and testing must begin today to hit Friday's deadline."
+        },
+        {
+          "key": "B",
+          "text": "Sit with the two developers and map every integration point — exactly where the loyalty hooks touch the Order Service, Payment flow, and User Account Service. Build a shared impact map before a single test is written."
+        },
+        {
+          "key": "C",
+          "text": "Deploy the feature to staging today so the QA team can start exploratory testing in parallel while developers write unit tests."
+        },
+        {
+          "key": "D",
+          "text": "Email the product manager immediately asking for a one week extension. Five days is not enough time to safely deliver a feature that touches three core services."
+        }
+      ],
+      "correctIndex": 1,
+      "explanation": "Without an impact map you are testing blind. You do not know what you do not know. Developers often underestimate integration surface area — the loyalty hooks might touch retry logic, refund flows, or async order processing that nobody thought of during development. Spending two hours on Monday building a shared impact map saves you from discovering unknown failure modes on Thursday night. Testing without this map means you will miss critical paths.",
+      "seniorSays": "Never start testing a feature that touches existing services without first mapping the blast radius. An hour of impact mapping saves you a night of firefighting."
+    },
+    {
+      "stepNumber": 2,
+      "situation": "You have completed the impact mapping session. The loyalty feature touches more than expected. It hooks into the order confirmation flow, the refund processing path, the nightly batch job that reconciles orders, and the user profile API that the mobile app calls. One developer mentions: the loyalty points calculation runs synchronously inside the order transaction. If the loyalty engine throws an exception, it could roll back the entire order. This was not in the original design discussion.",
+      "logs": [],
+      "question": "The loyalty calculation runs synchronously inside the order transaction. A loyalty engine failure could roll back a customer's entire order. How do you handle this?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Accept the risk for now. The loyalty engine has been tested and should not throw exceptions. Revisiting the architecture will delay the Friday launch."
+        },
+        {
+          "key": "B",
+          "text": "Wrap the loyalty calculation in a try-catch so that if it fails, the order still completes and the points are simply not awarded. Log the failure for reconciliation later."
+        },
+        {
+          "key": "C",
+          "text": "Move the loyalty calculation to an async background job that processes after the order is confirmed. Decouple it entirely from the order transaction."
+        },
+        {
+          "key": "D",
+          "text": "Add a feature flag to disable loyalty points entirely if error rates exceed a threshold. Keep the synchronous design but add a kill switch."
+        }
+      ],
+      "correctIndex": 1,
+      "explanation": "Option B is the right pragmatic call for a Friday deadline. The loyalty feature must never be able to break an order — orders are revenue, loyalty points are a nice-to-have. A try-catch with logging and reconciliation is a well-established pattern for exactly this scenario. Option C is architecturally superior but requires development and testing time you do not have. Option D is also good but does not protect against the synchronous failure. Option A is how you create a P1 incident on Friday night.",
+      "seniorSays": "A loyalty engine failure must never cancel a customer's order. When a peripheral feature touches a revenue-critical path, make it fail silently and reconcile later. Protect the core transaction above everything else."
+    },
+    {
+      "stepNumber": 3,
+      "situation": "It is Tuesday. The try-catch wrapper has been implemented and reviewed. Now the QA lead asks: what exactly should we test? The team has 2 QA engineers available for 2 days. There are potentially hundreds of order flow combinations — different payment methods, partial refunds, guest checkouts, mobile app orders, and the nightly batch reconciliation job. There is no way to test everything in the time available.",
+      "logs": [],
+      "question": "Two QA engineers, two days, hundreds of possible test paths. How do you decide what gets tested?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Ask QA to test the happy path thoroughly — a standard order with loyalty points applied. If the main flow works, edge cases are acceptable risk."
+        },
+        {
+          "key": "B",
+          "text": "Prioritize by risk and volume. Test the highest transaction volume paths first, then the paths where a failure would cause the most damage — refunds, failed payments, and the batch reconciliation job."
+        },
+        {
+          "key": "C",
+          "text": "Generate a full regression test suite and automate as much as possible in the two days available. Automated coverage is more reliable than manual testing."
+        },
+        {
+          "key": "D",
+          "text": "Ask the product manager to reduce scope — launch loyalty points for new orders only and exclude refunds, batch jobs, and mobile app for the first release."
+        }
+      ],
+      "correctIndex": 1,
+      "explanation": "Risk-based testing is the only rational approach when time is constrained. You cannot test everything so you must protect what matters most. High volume paths matter because a bug there affects the most customers. Refunds and batch jobs matter because failures there cause financial reconciliation issues that are expensive and embarrassing to fix. Happy path only is dangerously naive. Full automation in two days is not realistic. Scope reduction in option D is actually a valid conversation but it is a product decision, not a testing decision — you can raise it separately.",
+      "seniorSays": "When you cannot test everything, test by risk not by convenience. Ask yourself: if this path fails in production, what is the blast radius? Start with the biggest blast radius first."
+    },
+    {
+      "stepNumber": 4,
+      "situation": "It is Wednesday afternoon. Testing is going well on the main order flow. But QA has just found a bug — when a registered user places an order and then immediately requests a refund within the same session, the loyalty points are credited and then not reversed correctly. The ledger shows a positive balance but the refund was processed. A user could game this to earn points on refunded orders. The bug is real but the scenario — refund within the same session — is rare in production data. The developer estimates 4 hours to fix and retest.",
+      "logs": [],
+      "question": "Loyalty points not reversed correctly on same-session refunds. Rare scenario but exploitable. Fix before Friday launch or ship with known issue?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Ship on Friday with the known issue. Same-session refunds are rare, the financial impact is low, and a 4-hour fix on Wednesday afternoon carries its own risk of introducing new bugs."
+        },
+        {
+          "key": "B",
+          "text": "Fix it today. A known exploitable bug must never be shipped intentionally. Even if rare, once it is in production someone will find it."
+        },
+        {
+          "key": "C",
+          "text": "Disable the refund flow from loyalty points entirely for the first release. Refunds will not affect loyalty balance at all until a proper fix is built and tested properly."
+        },
+        {
+          "key": "D",
+          "text": "Ship on Friday but add monitoring to detect same-session refund patterns. If exploit activity is detected, disable loyalty points via feature flag."
+        }
+      ],
+      "correctIndex": 2,
+      "explanation": "Option C is the most pragmatic and honest engineering decision. Shipping a known exploitable bug is never acceptable — option A normalizes cutting corners on known issues. Option B sounds right but a 4-hour fix on Wednesday afternoon with a Friday deadline is a compressed development and retest cycle that can introduce new bugs into an already complex integration. Option C cleanly reduces scope in a way that is safe and honest — refunds simply do not affect loyalty balance yet. This is communicated to the product manager as a known limitation, not hidden. Option D is clever but reactive.",
+      "seniorSays": "Never ship a known exploitable bug. But also do not rush a fix under pressure in a complex integration. Reducing scope cleanly is better than shipping broken or introducing new bugs chasing a Wednesday afternoon fix."
+    },
+    {
+      "stepNumber": 5,
+      "situation": "It is Thursday morning. You need to communicate the launch plan to the product manager and the business stakeholders. The feature is on track for Friday but with one known scope reduction — refund-related loyalty adjustments are excluded from the first release and will follow in a subsequent release. The product manager is not technical. The business stakeholders have been promised full loyalty points functionality by Friday.",
+      "logs": [],
+      "question": "How do you communicate the scope reduction to the product manager and business stakeholders?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Send a technical explanation — describe the same-session refund bug, why fixing it in two days carries risk, and why the try-catch wrapper makes a clean scope reduction safer than a rushed fix."
+        },
+        {
+          "key": "B",
+          "text": "Frame it in business terms: the loyalty feature launches Friday as planned. Points are earned on all purchases. Refund adjustments — which affect a small minority of transactions — will follow in release two, already scoped and planned. The Friday launch is not delayed."
+        },
+        {
+          "key": "C",
+          "text": "Do not mention the scope reduction until after launch. The excluded functionality is rare and stakeholders will not notice. Raise it proactively only if someone asks."
+        },
+        {
+          "key": "D",
+          "text": "Ask the product manager to make the call. Present both options — ship with the scope reduction or delay the launch by one week for a complete implementation — and let them decide."
+        }
+      ],
+      "correctIndex": 1,
+      "explanation": "Non-technical stakeholders do not need to understand try-catch wrappers and same-session refund edge cases. They need to understand business impact. Option B translates the engineering decision into business language — launch is on time, core functionality is complete, a minor edge case is deferred to release two. This is honest, professional, and does not create unnecessary alarm. Option C is dishonest and always backfires. Option A loses the audience immediately. Option D is abdication — the engineering team should recommend a path, not offload the decision.",
+      "seniorSays": "When communicating scope changes to non-technical stakeholders, translate engineering decisions into business outcomes. What works, what is deferred, and when is it coming. Never hide known limitations and never explain them in technical jargon."
+    },
+    {
+      "stepNumber": 6,
+      "situation": "It is Friday morning. Launch is in four hours. The deployment is ready. Feature flags are configured — loyalty points can be disabled globally in 30 seconds if needed. Monitoring dashboards are set up. The team is assembled. A junior developer asks: should we deploy at 10am as planned or wait until after lunch when transaction volume is lower? Current transaction data shows 10am has moderate volume, 2pm is the daily low point.",
+      "logs": [],
+      "question": "Deploy at 10am as planned or shift to 2pm when transaction volume is lower?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Deploy at 10am as planned. The team is assembled, ready, and alert. Changing the time now adds unnecessary coordination overhead."
+        },
+        {
+          "key": "B",
+          "text": "Shift to 2pm. Lower transaction volume means fewer customers affected if something unexpected happens in the first 30 minutes post-deployment. The team can monitor the 10am to 2pm window as a final sanity check."
+        },
+        {
+          "key": "C",
+          "text": "Deploy at 10am but with loyalty points disabled via feature flag. Run for one hour with the feature off, confirm system stability, then enable loyalty points at 11am."
+        },
+        {
+          "key": "D",
+          "text": "Push the deployment to Monday. Friday afternoon deployments are a well-known anti-pattern and this feature touches three core services."
+        }
+      ],
+      "correctIndex": 2,
+      "explanation": "Option C is the most sophisticated and lowest risk deployment strategy. Deploying the code first with the feature disabled lets you confirm that the deployment itself — migrations, service restarts, configuration changes — did not break anything before you introduce the new functionality to real transactions. This is called a dark launch or a flag-controlled rollout. Option B is also reasonable but loses the assembled and alert team advantage. Option D is overly cautious given the preparation done all week. Option A skips a valuable risk reduction step.",
+      "seniorSays": "When deploying a feature that touches multiple existing services, separate the code deployment from the feature activation. Deploy dark, confirm stability, then enable. Two steps are always safer than one."
+    },
+    {
+      "stepNumber": 7,
+      "situation": "It is 11:05am. Loyalty points have been enabled via feature flag for 35 minutes. Transaction volume is normal. Monitoring shows loyalty points being awarded correctly on completed orders. Then an alert fires — the LoyaltyLedger database table insert latency has spiked from 4ms average to 340ms average over the last 10 minutes. Orders are still completing successfully because of the try-catch wrapper. But the ledger is falling behind and loyalty balances shown to users may be 10 to 15 minutes stale.",
+      "logs": [
+        "WARN|11:03:17 LoyaltyLedger: Insert latency 287ms — baseline 4ms",
+        "WARN|11:04:02 LoyaltyLedger: Insert latency 312ms — baseline 4ms",
+        "INFO|11:04:03 OrderService: txn_f7g8h9 completed successfully",
+        "WARN|11:05:11 LoyaltyLedger: Insert latency 341ms — SLA breach",
+        "INFO|11:05:12 OrderService: txn_j1k2l3 completed successfully"
+      ],
+      "question": "LoyaltyLedger insert latency spiked to 340ms. Orders completing fine. Loyalty balances 10-15 minutes stale. What do you do?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Disable loyalty points via feature flag immediately. Any unexpected latency spike on launch day is a signal to stop and investigate before it gets worse."
+        },
+        {
+          "key": "B",
+          "text": "Keep running and investigate in parallel. Orders are completing fine, the try-catch is protecting revenue, and stale loyalty balances are a poor experience but not a critical failure. Identify root cause before deciding."
+        },
+        {
+          "key": "C",
+          "text": "Immediately scale up the database instance to handle the increased write load. Latency spikes on launch day are expected as real traffic hits new tables."
+        },
+        {
+          "key": "D",
+          "text": "Roll back the entire deployment. A latency spike this significant within 35 minutes of launch indicates a deeper problem that will get worse under full load."
+        }
+      ],
+      "correctIndex": 1,
+      "explanation": "Investigate before acting. The system is protecting itself correctly — the try-catch means orders are safe. Stale loyalty balances are a degraded experience, not a critical failure. Disabling immediately in option A loses valuable production data about the root cause. Scaling up in option C is premature without understanding why inserts are slow — it could be a missing index, a locking issue, or something else that more capacity will not fix. Rolling back in option D is nuclear when revenue is unaffected. Parallel investigation with clear ownership is the right call.",
+      "seniorSays": "On launch day, distinguish between degraded experience and critical failure. Revenue-impacting issues get immediate action. Experience degradation gets parallel investigation while the system continues running safely."
+    },
+    {
+      "stepNumber": 8,
+      "situation": "Investigation reveals the root cause — the LoyaltyLedger table is missing a clustered index on the TransactionDate column. Inserts are doing full table scans to maintain sort order. The fix is a single index creation which can be run online without downtime on SQL Server. It will take approximately 8 minutes to build on the current data volume. Your DBA confirms it is safe to run now. Adding the index will immediately resolve the latency. It is 11:34am.",
+      "logs": [
+        "INFO|11:31:44 DBA: Root cause confirmed — missing clustered index on LoyaltyLedger.TransactionDate",
+        "INFO|11:31:45 DBA: Online index build estimated 8 minutes — no downtime required",
+        "WARN|11:31:50 LoyaltyLedger: Insert latency 358ms — still elevated",
+        "INFO|11:32:01 OrderService: txn_m3n4o5 completed successfully"
+      ],
+      "question": "Missing index identified. DBA confirms online index build is safe and takes 8 minutes. What do you do?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Run the index creation now. Root cause is confirmed, fix is safe, DBA has signed off. Every minute of delay means more stale loyalty balances for customers."
+        },
+        {
+          "key": "B",
+          "text": "Disable loyalty points via feature flag first, run the index build, then re-enable once latency returns to baseline. Eliminate variables during the fix."
+        },
+        {
+          "key": "C",
+          "text": "Wait until tonight after business hours to run the index build. Even though the DBA says it is safe, production schema changes should never be made during peak business hours."
+        },
+        {
+          "key": "D",
+          "text": "Add the index creation to a proper change management ticket and schedule it for next week. Production database changes must go through the full change process."
+        }
+      ],
+      "correctIndex": 1,
+      "explanation": "Option B is the most controlled approach. Disabling the feature first means no new transactions are being written to the LoyaltyLedger during the index build, which makes the 8-minute build faster and eliminates any risk of write contention during the operation. Once the index is built and latency confirmed normal, re-enable loyalty points. This takes 10 minutes total and gives you a clean, verifiable fix. Option A is almost right but skips an easy risk reduction step. Option C and D are overly cautious to the point of being unhelpful when a safe online fix is available right now.",
+      "seniorSays": "When applying a live fix, reduce variables wherever possible. Pausing writes during an index build is a small step that makes the operation cleaner and faster. Confirm the fix worked before reopening the tap."
+    }
+  ]
+}

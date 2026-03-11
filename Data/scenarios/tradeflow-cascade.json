@@ -1,0 +1,197 @@
+{
+  "id": "tradeflow-cascade",
+  "title": "Xero went down for 4 minutes. Your platform was down for 47.",
+  "description": "TradeFlow's OrderService, InventoryService, and InvoiceService all look independent. They are not. A 4-minute Xero API outage at 7:52am — right in MetroSupply's peak ordering window — cascades into a full order confirmation blackout across all 210 distributor tenants. Nothing in the monitoring predicted it. Everything in the architecture enabled it.",
+  "type": "System Design",
+  "difficulty": "Senior",
+  "estimatedMinutes": 9,
+  "isAvailable": true,
+  "sequence": 1,
+  "steps": [
+    {
+      "stepNumber": 1,
+      "situation": "TradeFlow is a B2B order management platform. OrderService is the core — retailers place bulk orders, OrderService confirms them by making two synchronous HTTP calls: first to InventoryService to reserve stock, then to InvoiceService to generate an invoice via Xero. Both must succeed for an order to confirm. It is Monday 7:52am — peak ordering window. MetroSupply, your largest tenant at 34% of daily order volume, has 4,800 orders to place before 9am. Application Insights starts showing a spike: OrderService p99 response time climbs from 480ms to 34,000ms. Within 3 minutes, order confirmation success rate drops from 99.1% to 0%. OrderService is returning 500 errors on every confirm attempt. InventoryService metrics look normal. InvoiceService shows all requests timing out. You are the senior engineer on call.",
+      "logs": [],
+      "question": "OrderService is returning 500s on all order confirmations. InventoryService looks fine. InvoiceService is timing out. 7:52am Monday. MetroSupply peak window. What is your first action?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Restart InvoiceService immediately. It is timing out, OrderService depends on it synchronously, and a restart is the fastest way to clear the issue."
+        },
+        {
+          "key": "B",
+          "text": "Check Application Insights for InvoiceService — specifically what it is waiting on. A timeout on InvoiceService does not mean InvoiceService is broken; it means something InvoiceService calls is not responding."
+        },
+        {
+          "key": "C",
+          "text": "Scale out OrderService on the Azure App Service Plan. The morning rush is overwhelming it — more instances will absorb the load."
+        },
+        {
+          "key": "D",
+          "text": "Check the Azure Service Bus dead letter queue. A backlog there could be causing order confirmation failures downstream."
+        }
+      ],
+      "correctIndex": 1,
+      "explanation": "Restarting InvoiceService clears its connections but not the underlying cause — if an external dependency is down, InvoiceService will time out again within seconds of restart. Scaling OrderService adds more instances all hammering the same blocked InvoiceService. The Service Bus dead letter queue is irrelevant to synchronous order confirmation failures. Application Insights on InvoiceService will show the outbound HTTP call — that is where the timeout is happening. InvoiceService calls Xero synchronously with no configured timeout. If Xero is not responding, every InvoiceService thread is hanging indefinitely waiting for a response that will never come.",
+      "seniorSays": "When a service is timing out, your first question is never what is wrong with the service — it is what is the service waiting for. Timeouts are almost never self-generated. They are inherited from a dependency."
+    },
+    {
+      "stepNumber": 2,
+      "situation": "You check Application Insights. InvoiceService outbound dependency telemetry shows all calls to api.xero.com failing with no response since 7:51am — exactly 1 minute before the cascade began. Xero's status page confirms: they declared an incident at 7:49am, API is degraded. InvoiceService has no timeout configured on its HttpClient call to Xero — it uses the .NET HttpClient default, which is effectively infinite. Every order confirmation since 7:51am has created a thread in InvoiceService that is hanging, waiting for Xero to respond. The App Service Plan is P2v3 — 2 vCores, 8GB RAM, shared across all TradeFlow services. InvoiceService thread pool is saturated. Because the App Service Plan is shared, OrderService and InventoryService are also starved of threads. It is now 7:58am. Xero is still down. MetroSupply cannot confirm a single order.",
+      "logs": [],
+      "question": "Xero is down. InvoiceService has infinite timeout. Thread pool is saturated on the shared App Service Plan, starving OrderService and InventoryService. What do you do right now?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Restart InvoiceService. This will release all the hanging threads, free the shared thread pool, and restore OrderService and InventoryService — even though Xero is still down, at least the other services recover."
+        },
+        {
+          "key": "B",
+          "text": "Temporarily disable the InvoiceService call from OrderService's confirm flow via a feature flag or config change. Orders confirm with stock reserved but invoice generation deferred. Unblock 210 tenants now, reconcile invoices when Xero recovers."
+        },
+        {
+          "key": "C",
+          "text": "Wait for Xero to recover. Their status page says they are working on it. Any change to the confirm flow under live incident pressure could create data inconsistency."
+        },
+        {
+          "key": "D",
+          "text": "Scale the App Service Plan to P3v3 — more vCores means more threads available, which should absorb the hanging InvoiceService requests and let OrderService and InventoryService breathe."
+        }
+      ],
+      "correctIndex": 1,
+      "explanation": "Restarting InvoiceService releases threads temporarily but new order confirmations will immediately create new hanging threads — within 60 seconds the thread pool is saturated again. Waiting for Xero means MetroSupply loses their entire peak ordering window. Scaling the App Service Plan gives more threads but they will all be consumed by hanging Xero calls just as fast — you are feeding the leak, not stopping it. Disabling the InvoiceService call via config is the surgical fix: it stops new threads from hanging, frees the existing ones on restart, and lets 210 tenants confirm orders. Deferred invoice generation is a reconcilable state. A platform-wide order blackout during peak is not.",
+      "seniorSays": "In a cascading failure, your job is to find and cut the dependency that is propagating the blast. A deferred invoice is a business inconvenience. A two-hour order blackout for 210 distributors is a business crisis."
+    },
+    {
+      "stepNumber": 3,
+      "situation": "You disable the InvoiceService call in OrderService's confirm flow via an existing feature flag — InvoiceGenerationEnabled — set to false in Azure App Configuration. InvoiceService is restarted to drain hanging threads. Within 90 seconds, OrderService p99 drops from 34,000ms back to 490ms. Order confirmations resume across all tenants. MetroSupply processes 1,240 orders in the next 11 minutes to partially recover their peak window. At 8:39am, Xero's status page marks the incident resolved. You re-enable InvoiceGenerationEnabled. InvoiceService begins processing. But now a new problem surfaces: the 847 orders confirmed during the Xero outage have stock reservations in InventoryService — StockReservations table has 847 rows with Status = Reserved — but no corresponding invoices in the Invoices table. InvoiceService has no record of these orders because it was bypassed. The finance team lead messages you: our Xero account is missing 47 minutes of invoices. Retailers are going to get delivery without an invoice.",
+      "logs": [],
+      "question": "847 confirmed orders have stock reserved but no invoice generated. Xero is back up. How do you reconcile?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Manually re-trigger invoice generation for each of the 847 orders by calling InvoiceService directly with the order IDs. Do it now while Xero is healthy."
+        },
+        {
+          "key": "B",
+          "text": "Write a one-off reconciliation script that queries Orders where Status = Confirmed AND InvoiceId IS NULL, then calls InvoiceService for each in batches of 50 with a delay between batches to avoid hammering Xero again. Log every result. Run it in staging first."
+        },
+        {
+          "key": "C",
+          "text": "Ask the finance team to manually create the 847 invoices in Xero directly. It is a one-time data fix and does not require engineering involvement."
+        },
+        {
+          "key": "D",
+          "text": "Re-process all orders from the outage window by replaying the order.confirmed events from the Service Bus dead letter queue."
+        }
+      ],
+      "correctIndex": 1,
+      "explanation": "Manual re-triggering of 847 orders one by one is error-prone and untracked. Asking finance to manually create invoices in Xero produces invoices that will never be in TradeFlow's own Invoices table — a permanent data inconsistency. Replaying dead letter queue events is wrong because these orders were confirmed successfully — there are no dead letter messages, the events were published. The invoice step was simply skipped. A reconciliation script that queries Orders by the exact condition — confirmed, no invoice — is auditable, batchable, rate-limited, and stageable. It treats the gap as a data problem, not an event problem, which is exactly what it is.",
+      "seniorSays": "Data reconciliation after a controlled bypass is not an incident — it is a planned recovery step. Write it like production code: query the exact gap, batch the calls, log every result, test in staging. Sloppy reconciliation creates more inconsistency than the original problem."
+    },
+    {
+      "stepNumber": 4,
+      "situation": "Reconciliation script runs successfully. All 847 invoices generated in Xero and recorded in the Invoices table. Finance confirms Xero is fully reconciled. It is now 11:15am. The incident lasted 47 minutes for customers — from first failure at 7:51am to full recovery at 8:38am. You sit down to write the post-mortem. The root causes are clear: InvoiceService had no timeout on its Xero HTTP call, OrderService had no circuit breaker on its InvoiceService call, and all services shared a single App Service Plan with no bulkhead isolation. Your engineering manager reads your draft and says: this is good, but the prevention section just says add a timeout and add a circuit breaker. That is not enough — I want to know how we make TradeFlow resilient to any third-party outage, not just Xero. What does a complete prevention section look like?",
+      "logs": [],
+      "question": "Manager says 'add a timeout and circuit breaker' is not enough prevention. What does a complete resilience strategy for TradeFlow's third-party dependency look like?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Add a 5-second timeout on the Xero HttpClient call and a Polly circuit breaker on the InvoiceService → Xero call. That directly addresses the two technical causes of this incident."
+        },
+        {
+          "key": "B",
+          "text": "Move InvoiceService to async — OrderService publishes an invoice.requested event to Service Bus on order confirm, InvoiceService processes it asynchronously. Xero outages no longer block order confirmation. Timeout and circuit breaker still added but the architecture no longer couples order confirmation to invoice generation latency."
+        },
+        {
+          "key": "C",
+          "text": "Add a timeout, circuit breaker, and separate the App Service Plan so InvoiceService runs in isolation. Thread pool saturation caused the blast radius — bulkhead isolation prevents it from spreading."
+        },
+        {
+          "key": "D",
+          "text": "Replace Xero with an internal invoicing module. Third-party SLA of 99.5% is not acceptable for a dependency in the synchronous confirm flow."
+        }
+      ],
+      "correctIndex": 1,
+      "explanation": "A timeout and circuit breaker on the Xero call prevents InvoiceService threads from hanging — but OrderService still calls InvoiceService synchronously. If InvoiceService's circuit breaker is open, OrderService still fails to confirm orders. Separating the App Service Plan reduces blast radius but does not fix the architectural coupling. Replacing Xero solves the wrong problem — any third-party API in a synchronous confirm flow creates the same risk. The real fix is architectural: decouple invoice generation from order confirmation entirely using Service Bus. Order confirms successfully, invoice.requested event is published, InvoiceService processes it when Xero is healthy. Timeout and circuit breaker are still added as defence in depth — but the architecture no longer makes order confirmation hostage to Xero's uptime.",
+      "seniorSays": "A timeout stops a thread from hanging forever. A circuit breaker stops you from hammering a failing service. Neither of them fixes a synchronous dependency on a third party in your critical path. Only moving that dependency out of the critical path fixes it."
+    },
+    {
+      "stepNumber": 5,
+      "situation": "Post-mortem approved. Your manager asks you to lead the architectural fix. The plan: make InvoiceService asynchronous — OrderService publishes an invoice.requested event to Service Bus on order confirm, InvoiceService subscribes and processes asynchronously. You begin designing the change. A senior colleague raises a concern in the design review: what happens to an invoice.requested event if InvoiceService is down when it arrives on the Service Bus? Service Bus will retry delivery, but if InvoiceService is down for more than the Service Bus message lock duration of 5 minutes, the message moves to the dead letter queue. Who monitors the dead letter queue? How does finance know an invoice failed to generate? A second colleague raises a different concern: during the transition period, some OrderService instances will be on the old synchronous code and some on the new async code — a rolling deployment means both versions run simultaneously for 8 to 12 minutes. An order confirmed on the old code triggers a synchronous InvoiceService call. An order confirmed on the new code publishes an event. How do you prevent duplicate invoices during the rollout?",
+      "logs": [],
+      "question": "Two valid concerns in the design review: dead letter queue monitoring and duplicate invoices during rolling deployment. How do you address both?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Address dead letter queue monitoring with an Azure Monitor alert on dead letter count exceeding 0. Address duplicate invoices by making InvoiceService idempotent — if an invoice already exists for an OrderId, skip generation and return success."
+        },
+        {
+          "key": "B",
+          "text": "Address dead letter queue with a nightly reconciliation job that checks Orders with no invoice after 2 hours. Address duplicates by taking a full maintenance window for the deployment — no rolling rollout, all instances switch simultaneously."
+        },
+        {
+          "key": "C",
+          "text": "Address dead letter queue by increasing the Service Bus message lock duration to 30 minutes. Address duplicates by deploying InvoiceService first so it can handle both synchronous calls and events before OrderService switches."
+        }
+      ],
+      "correctIndex": 0,
+      "explanation": "A nightly reconciliation job for dead letters means finance discovers missing invoices up to 23 hours late — unacceptable. A full maintenance window avoids the duplicate problem but takes down order confirmation for all 210 tenants unnecessarily. Increasing the lock duration delays dead lettering but does not prevent it or alert anyone. An Azure Monitor alert on dead letter count greater than zero gives immediate visibility — any failed invoice is caught within seconds. Idempotency on InvoiceService is the correct solution to the rollout duplicate risk: regardless of whether an invoice request arrives via synchronous HTTP or Service Bus event, InvoiceService checks if an invoice already exists for that OrderId before calling Xero. One check eliminates the entire duplicate risk from rolling deployments, re-deliveries, and any future retry scenario.",
+      "seniorSays": "Idempotency is not a nice-to-have in an event-driven system — it is a correctness guarantee. Design every consumer to handle the same message twice without producing a different outcome. Then rolling deployments, retries, and re-deliveries become non-events."
+    },
+    {
+      "stepNumber": 6,
+      "situation": "Design approved. Both fixes implemented — dead letter alert and idempotent InvoiceService. The async architecture is deployed and stable. Three weeks later, MetroSupply's ops director calls your account manager with a complaint: since the platform change, we sometimes see a 2 to 4 minute delay between order confirmation and invoice appearing in Xero. Before the change, invoices appeared instantly. The account manager escalates to your VP of Engineering who messages you: MetroSupply is unhappy. Did we introduce a regression? You check Service Bus metrics: average message processing latency is 18 seconds end-to-end under normal load. But between 7am and 9am during MetroSupply's peak, the invoice.requested topic has a message backlog — InvoiceService is processing at ~22 invoices per minute while MetroSupply is confirming ~80 orders per minute during their rush. The backlog peaks at 340 messages, taking up to 4 minutes to drain. InvoiceService is a single instance running on the shared App Service Plan.",
+      "logs": [],
+      "question": "InvoiceService cannot keep up with MetroSupply's 7am–9am peak — backlog of 340 messages, 4-minute invoice delay. How do you fix it?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Scale out InvoiceService to 3 instances during the 7am–9am window using Azure App Service autoscale rules based on Service Bus message count. More consumers drain the backlog faster."
+        },
+        {
+          "key": "B",
+          "text": "Increase InvoiceService's internal concurrency — configure the Service Bus processor to handle 10 messages concurrently instead of 1. Single instance, more parallel processing."
+        },
+        {
+          "key": "C",
+          "text": "Tell MetroSupply the 2 to 4 minute delay is by design — invoice generation is now asynchronous and near-real-time is the correct expectation, not instant. Manage the expectation, not the architecture."
+        },
+        {
+          "key": "D",
+          "text": "Move MetroSupply to a dedicated InvoiceService instance on its own App Service Plan. As the largest tenant at 34% of volume, isolation gives them consistent performance without impacting other tenants."
+        }
+      ],
+      "correctIndex": 0,
+      "explanation": "Increasing concurrency on a single instance helps but InvoiceService calls Xero synchronously — each invoice generation is I/O bound and waits on Xero's response. More parallel threads on one instance hit Xero rate limits faster and provide limited throughput gain. Telling MetroSupply a 4-minute delay is by design is factually wrong — the architecture change introduced a latency regression that did not exist before, and dismissing it damages the client relationship. A dedicated instance for MetroSupply solves their problem but creates a separate deployment to manage for every large tenant — it does not scale as a pattern. Autoscale based on Service Bus message count is the right architectural lever: when the backlog grows, more InvoiceService instances spin up, drain the queue faster, and scale back down. It is elastic, it serves all tenants proportionally, and it is exactly what Service Bus consumer autoscaling is designed for.",
+      "seniorSays": "When a Service Bus consumer cannot keep up with producer throughput, the answer is almost always horizontal scale triggered by queue depth — not concurrency tuning, not tenant isolation. Let the backlog be the signal. Let autoscale be the response."
+    },
+    {
+      "stepNumber": 7,
+      "situation": "Autoscale configured. InvoiceService scales to 3 instances during peak, backlog clears in under 40 seconds. MetroSupply's invoice delay drops to under 25 seconds — acceptable. Your VP closes the complaint. One month later, your team is in quarterly architecture review. Your manager asks you to present the lessons from the Xero incident as a framework for evaluating all future third-party integrations before they go into production. Three new integrations are being planned: a shipping carrier API in DispatchService called synchronously when a delivery run is dispatched, a credit check API in OrderService called synchronously before a new retailer's first order is confirmed, and a document signing API in InvoiceService called asynchronously after invoice generation. You have 10 minutes. What framework do you present?",
+      "logs": [],
+      "question": "Three new third-party integrations planned. You need a framework to evaluate each one before it goes into production. What does that framework look like?",
+      "options": [
+        {
+          "key": "A",
+          "text": "For every third-party integration: check their published SLA, add a timeout, add a Polly circuit breaker, and add an alert on failure rate. Apply this checklist to all three."
+        },
+        {
+          "key": "B",
+          "text": "One question determines everything: is this integration in the critical path of a user-facing transaction? If yes — make it async or make failure graceful with a fallback. If no — timeout and circuit breaker are sufficient. Apply that question to each integration, then decide the pattern."
+        },
+        {
+          "key": "C",
+          "text": "Require all third-party integrations to be asynchronous via Service Bus. No exceptions. Synchronous third-party calls are banned from the codebase going forward."
+        },
+        {
+          "key": "D",
+          "text": "Evaluate each integration by its vendor's uptime history. Vendors with more than 2 incidents per year must be async. Vendors with strong SLAs can be synchronous."
+        }
+      ],
+      "correctIndex": 1,
+      "explanation": "A checklist of timeout, circuit breaker, and alert is necessary but not sufficient — it is what you add after you decide the integration pattern. Banning all synchronous third-party calls is too blunt — the document signing API in InvoiceService is already asynchronous and low-risk; over-engineering it adds complexity for no gain. Evaluating by uptime history is fragile — a vendor with a perfect track record can still have an outage tomorrow. The one question that matters is whether the integration is in the critical path of a user-facing transaction. The shipping carrier API: dispatching a delivery run is not instant user-facing — async is fine. The credit check API: it blocks a retailer's first order confirmation — if it fails, what is the fallback? That is the conversation. The document signing API is already async and post-transaction — minimal risk. One question, applied consistently, produces better architectural decisions than any checklist.",
+      "seniorSays": "Every third-party API will eventually go down. The only question worth asking before you integrate is: when it does, what happens to your users? If the answer is nothing good, make it async. If the answer is graceful degradation, make it explicit. If the answer is acceptable failure, add a timeout and move on."
+    }
+  ]
+}

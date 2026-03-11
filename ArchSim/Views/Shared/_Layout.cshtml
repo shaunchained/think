@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-00FS1FXHP5"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag() { dataLayer.push(arguments); }
+        gtag('js', new Date());
+
+        gtag('config', 'G-00FS1FXHP5');
+    </script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"]</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="~/archsim/css/site.css" asp-append-version="true" />
+    <script>
+        // Apply saved theme before first paint to prevent flash
+        (function () {
+            var t = localStorage.getItem('think-theme') || 'dark';
+            document.documentElement.setAttribute('data-theme', t);
+        })();
+    </script>
+</head>
+<body>
+    <nav class="site-nav">
+        <a href="/" class="site-brand">Think</a>
+        <span class="site-nav-sub">Scenario Simulator for Engineers</span>
+        <div class="theme-switcher" role="group" aria-label="Theme">
+            <button class="theme-opt theme-opt-dark" onclick="setTheme('dark')">☾ Dark</button>
+            <button class="theme-opt theme-opt-light" onclick="setTheme('light')">☀ Light</button>
+        </div>
+    </nav>
+    <main>
+        @RenderBody()
+    </main>
+    <script src="~/archsim/js/scenario-player.js" asp-append-version="true"></script>
+    @await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>

@@ -1,0 +1,201 @@
+{
+  "id": "notification-at-scale",
+  "title": "Everyone wants real-time. You have one system. Three teams. Zero agreement.",
+  "description": "A simple-sounding feature request — real-time order status updates — lands on your plate. Three teams. Three different definitions. One architecture decision that, if wrong, will mean months of rework.",
+  "type": "System Design",
+  "difficulty": "Senior",
+  "estimatedMinutes": 5,
+  "isAvailable": true,
+  "sequence": 3,
+  "steps": [
+    {
+      "stepNumber": 1,
+      "situation": "Your team owns the OrderService — a REST API on .NET 8, Azure App Service. A new initiative is kicking off: real-time order status updates for customers. The PM sends a Slack message: We need customers to see live order status — confirmed, packed, shipped, delivered. Should be straightforward. Three teams are involved — Mobile (customer app), Ops (warehouse dashboard), and Integrations (third-party logistics partners). Current setup: mobile app polls GET /orders/{id} every 30 seconds. Average load is 18,000 orders/day, peaking at 140,000 during sale events. A kickoff call is scheduled for tomorrow. Before the call, you check in with each team. Mobile says: we need sub-second push — polling is killing our battery metrics. Ops says: a dashboard refresh every 5 seconds is fine, we do not need push. Integrations says: our logistics partners POST status webhooks to us, we just need those reliably stored and forwarded. You have one hour to prepare.",
+      "logs": [],
+      "question": "Three teams, three different needs — push, poll, webhook forwarding. You have one hour before the kickoff. What do you do with it?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Sketch a single unified architecture that satisfies all three teams and present it on the call. Come prepared with a solution."
+        },
+        {
+          "key": "B",
+          "text": "Write down the load numbers and the three different delivery models each team is implying, then prepare specific questions that will expose the real constraints — not just what each team wants, but why and what happens if they do not get it."
+        },
+        {
+          "key": "C",
+          "text": "Read up on WebSockets vs SSE vs webhooks so you are technically sharp on the call. Requirements will emerge from discussion."
+        },
+        {
+          "key": "D",
+          "text": "Ask the PM to send a written requirements doc before the call. A kickoff without documented requirements wastes everyone's time."
+        }
+      ],
+      "correctIndex": 1,
+      "explanation": "Walking into a multi-team requirements call with a solution is dangerous — you anchor the conversation on your assumptions before the real constraints surface. Reading docs is passive preparation. Asking for a requirements doc at this stage is premature friction. The highest-leverage preparation is mapping what you already know: three different delivery models, wildly different load profiles, and preparing the questions that will surface what is truly non-negotiable versus what is a preference.",
+      "seniorSays": "The best thing you can bring to a requirements call is not an answer — it is the right questions. Know the data before the call. Let the constraints come from the room."
+    },
+    {
+      "stepNumber": 2,
+      "situation": "Kickoff call. You ask your prepared questions. Within twenty minutes, the conflicts become sharp. Mobile wants WebSocket push and says dropping polling is non-negotiable. Ops says a 5-second poll is fine and they do not want a complex push setup. Integrations says they just need reliable inbound webhook ingestion and forwarding to OrderService — they do not care about real-time at all. You note the scale: Mobile has roughly 22,000 concurrent users at peak. Ops has 40 warehouse operators. Integrations has 12 logistics partners sending 50 to 300 webhooks per hour each. The PM looks at you and says: Can we just build one thing that works for everyone?",
+      "logs": [],
+      "question": "The PM asks if you can build one thing that works for everyone. What is your honest answer in this meeting?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Yes — an event-driven architecture with a message bus can serve all three. Commit to it now and design it after the call."
+        },
+        {
+          "key": "B",
+          "text": "Probably not one thing — the three delivery models have different latency, reliability, and scale requirements. But one event backbone could power different delivery mechanisms for each. You need a day to validate that architecture before committing."
+        },
+        {
+          "key": "C",
+          "text": "No — these are three separate problems. Build three separate systems. Trying to unify them will create a system that does none of them well."
+        },
+        {
+          "key": "D",
+          "text": "Ask the three teams to debate and reach consensus first. You will build whatever they agree on."
+        }
+      ],
+      "correctIndex": 1,
+      "explanation": "Committing to a unified architecture in the room without validation is how you end up locked into a design you sketched under pressure. Saying flatly 'no, three systems' ignores the genuine architectural possibility of shared event infrastructure. Letting the teams debate without technical guidance is abdication. The honest, senior answer is: one backbone might work, but I won't commit to that in this meeting — give me a day to verify it stands up to the actual numbers.",
+      "seniorSays": "The most dangerous words in an architecture meeting are 'yes we can build that' before you have checked the numbers. Confidence is not the same as correctness."
+    },
+    {
+      "stepNumber": 3,
+      "situation": "You get your day. You design a candidate architecture: OrderService publishes status change events to Azure Service Bus. Three consumers — a WebSocket hub for mobile push, a lightweight SSE endpoint for the Ops dashboard, and a webhook forwarder for logistics partners. You run the numbers for peak load. Service Bus throughput at peak is roughly 39 events per second — comfortably within Standard tier. But you hit a problem: 22,000 concurrent WebSocket connections would require sticky sessions, and Azure App Service does not support that at this scale. Azure SignalR Service solves it cleanly but costs around $650 per month — which the PM did not budget for. SSE and the webhook forwarder have no issues — both stateless and queue-backed respectively.",
+      "logs": [],
+      "question": "The architecture works — except the WebSocket hub hits a scaling wall that requires either a costly managed service or significant re-architecture. What do you do?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Recommend Azure SignalR Service. $650/month is cheap compared to the engineering cost of a custom sticky session solution. Present the cost to the PM as a non-negotiable infrastructure requirement."
+        },
+        {
+          "key": "B",
+          "text": "Drop WebSocket from the design. SSE is stateless, scales fine, and mobile clients can use it instead. Simplify the architecture and avoid the cost."
+        },
+        {
+          "key": "C",
+          "text": "Go back to the Mobile team before going to the PM. Find out if sub-second push is a hard product requirement or a preference — because SSE at 1–2 second latency might be acceptable and eliminates the scaling problem entirely."
+        },
+        {
+          "key": "D",
+          "text": "Build the custom sticky session solution. It avoids the recurring cost and gives you full control. It is more work upfront but better long term."
+        }
+      ],
+      "correctIndex": 2,
+      "explanation": "Before spending $650/month forever or investing weeks in a custom sticky session layer, the right move is to validate the actual requirement. Mobile said 'sub-second push' — but is that a product requirement backed by user research, or an engineer's preference? SSE at 1-2 second latency is invisible to most users. If the Mobile team's real requirement is 'fast enough that users feel it is live,' SSE solves it at zero extra cost. Never let a technical constraint force a decision before you have questioned the requirement it is based on.",
+      "seniorSays": "Before you solve an expensive technical problem, make sure the requirement that created it is actually real. Half the time, requirements stated as absolutes have more flexibility than the person who stated them remembers."
+    },
+    {
+      "stepNumber": 4,
+      "situation": "You go back to the Mobile team lead and ask: when you said sub-second, was that a hard product requirement or a pain point framing? He pauses and says: honestly, what we cannot have is the current 30-second polling gap. If updates land within 2 to 3 seconds, customers will feel it is real-time. That changes everything. SSE solves all three consumers cleanly — no SignalR, no sticky sessions, no extra cost. You revise the architecture to Service Bus feeding three stateless consumers. But when you present the revised design, the Integrations team raises a new concern: our deployment window causes a 45-second rolling restart. What happens to webhook events that are in-flight during that window? The current setup has no dead letter queue configured. At normal rates of 180 webhooks per hour, that is roughly 2 to 3 events at risk per deployment. At peak logistics windows of 900 per hour, it is closer to 11.",
+      "logs": [],
+      "question": "Integrations is right — a 45-second deployment window could drop in-flight webhook events. How do you address this?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Configure a dead letter queue on the Service Bus subscription and a reprocessing job. Messages survive the deployment window and are processed after restart."
+        },
+        {
+          "key": "B",
+          "text": "Ask Integrations to implement retry logic on their side. The responsibility for reliable delivery is the sender's, not the receiver's."
+        },
+        {
+          "key": "C",
+          "text": "Move to blue-green deployments to eliminate the downtime window entirely. Zero downtime means no lost events."
+        },
+        {
+          "key": "D",
+          "text": "Accept the risk. 45 seconds at 180 webhooks/hour means roughly 2–3 lost events. That is an acceptable loss rate for status updates."
+        }
+      ],
+      "correctIndex": 0,
+      "explanation": "Dead letter queue plus reprocessing is the right architectural answer here. It is the Service Bus feature designed exactly for this problem — durable message storage that survives consumer downtime. Asking the sender to retry is passing your reliability problem to someone else's system. Blue-green solves downtime but adds deployment complexity that is disproportionate to this problem. Accepting loss of status updates sounds trivial until a customer's 'delivered' event silently disappears and they call support.",
+      "seniorSays": "Reliability gaps at integration boundaries are never acceptable just because the numbers look small. A dead letter queue costs you one afternoon. A missing delivery event costs you a support ticket, a refund, and customer trust."
+    },
+    {
+      "stepNumber": 5,
+      "situation": "Architecture is solid. Dead letter queue configured. The PM now wants to discuss rollout and asks: can we go live with all three consumers at once? Mobile has a marketing campaign starting in 12 days — a hard dependency. Ops is flexible. But Integrations says they need at least 3 weeks to coordinate with their 12 logistics partners to update webhook endpoint URLs. If you go live before Integrations is ready, their partners will keep posting to the old polling endpoint — creating a split state where some order updates flow through the new event pipeline and some still come through old polling, causing inconsistent order states on the dashboard. The old polling endpoint is not being deprecated and can remain active.",
+      "logs": [],
+      "question": "Go live in 12 days risks a split state where Integrations is not ready. What is your recommended rollout approach?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Delay the entire launch by 3 weeks until all three consumers are ready. A partial launch creates inconsistent data and support headaches."
+        },
+        {
+          "key": "B",
+          "text": "Launch Mobile and Ops on the new event pipeline in 12 days. Keep the old polling endpoint live in parallel. Migrate Integrations to the new system in 3 weeks after partner coordination is done. The two systems can coexist temporarily."
+        },
+        {
+          "key": "C",
+          "text": "Launch everything in 12 days. Tell Integrations to compress their 3-week timeline. Marketing campaigns cannot move."
+        },
+        {
+          "key": "D",
+          "text": "Launch Mobile only in 12 days. Ops and Integrations follow once Integrations is ready. Minimize the split state window."
+        }
+      ],
+      "correctIndex": 1,
+      "explanation": "Phased rollout with parallel operation is the right call. The old polling endpoint is not being deprecated — it can coexist. Mobile and Ops launch on the new pipeline without depending on Integrations readiness. Integrations migrates cleanly on their timeline without partner pressure. The temporary split state is managed and bounded, not chaotic. Delaying the whole launch for one team's external dependency penalises everyone. Forcing Integrations to compress 3 weeks of partner coordination is unrealistic and creates errors.",
+      "seniorSays": "Phased rollout with a defined migration window beats a big-bang launch every time. The goal is not to launch everything at once — it is to launch each part when it is actually ready."
+    },
+    {
+      "stepNumber": 6,
+      "situation": "Two weeks after full launch. All three consumers are live and healthy. A junior engineer on your team has been monitoring Service Bus metrics and comes to you excited: we are only using about 8% of Standard tier throughput limits — we could save money by downgrading to Basic tier. You pull up the Azure Service Bus tier comparison. Standard tier supports topics, subscriptions, dead letter queues, and message sessions. Basic tier supports queues only — no topics, no subscriptions, no dead letter queues. Your current architecture uses one topic, three subscriptions, and one dead letter queue.",
+      "logs": [],
+      "question": "The junior engineer suggests downgrading Service Bus to Basic tier to save costs. What do you tell him?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Good idea — utilisation is low and cost optimisation matters. Approve the downgrade and help him execute it."
+        },
+        {
+          "key": "B",
+          "text": "Reject it immediately. Basic tier does not support topics, subscriptions, or dead letter queues — the entire architecture depends on these features. Downgrading would require rebuilding the routing and reliability layer from scratch."
+        },
+        {
+          "key": "C",
+          "text": "Partially agree — explore moving the Ops SSE consumer to Basic since it is low-stakes, but keep Standard for Mobile and Integrations."
+        },
+        {
+          "key": "D",
+          "text": "Tell him to raise a formal cost optimisation proposal. This decision needs PM and finance approval before any infrastructure change."
+        }
+      ],
+      "correctIndex": 1,
+      "explanation": "This is a trap that catches engineers who optimise on metrics without reading the constraints. Basic tier is not a cheaper Standard tier — it is a fundamentally different product. No topics means no fan-out to multiple consumers. No subscriptions means no independent consumer offsets. No dead letter queue means the reliability guarantee you built for Integrations disappears. The $10/month saving would cost weeks of rework and eliminate the architecture's core properties. This is the kind of decision that looks like a quick win and becomes a production incident.",
+      "seniorSays": "Never optimise on one metric — cost, utilisation, latency — without reading what you are trading away. The junior saw 8% utilisation. You see the feature set that the other 92% headroom is protecting."
+    },
+    {
+      "stepNumber": 7,
+      "situation": "Three months later. A new requirement lands from the marketing team: they want to send personalised push notifications — flash sale alerts, loyalty offers — through the same pipeline. Volume estimate: up to 2 million pushes in a 10-minute window during a sale event. Your current pipeline peaks at roughly 39 events per second for order status updates. Two million messages in 10 minutes works out to 3,333 messages per second — nearly 85 times your current peak. Service Bus Standard tier maxes out at 1,000 messages per second per messaging unit. Premium tier goes up to 4,000. Your SSE hub was designed for per-user fan-out on order events, not bulk broadcast. There is no dedicated push notification service in the current stack. The PM asks: can the existing system handle this?",
+      "logs": [],
+      "question": "Marketing wants 2 million push notifications through your pipeline in 10 minutes. The existing system tops out at roughly 1,000 msg/sec. What is your answer to the PM?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Yes — upgrade Service Bus to Premium tier. It handles 4,000 msg/sec. Problem solved, same architecture."
+        },
+        {
+          "key": "B",
+          "text": "No — this is a categorically different use case. Order status updates are low-volume, user-specific events. Mass marketing pushes are high-volume broadcasts. They should not share the same pipeline. Recommend a dedicated push notification service — Firebase, Azure Notification Hubs — built for exactly this scale and pattern."
+        },
+        {
+          "key": "C",
+          "text": "Maybe — run a load test on the current system at 3,000 msg/sec before making a recommendation. Do not reject or accept without data."
+        },
+        {
+          "key": "D",
+          "text": "Yes, but only if the marketing team staggers their sends — break 2 million into batches over 30 minutes instead of 10. That brings it within current capacity."
+        }
+      ],
+      "correctIndex": 1,
+      "explanation": "This is an architectural boundary question, not a scaling question. Upgrading to Premium tier gets you to 4,000 msg/sec — barely enough at peak, with no headroom — but it still puts marketing broadcast traffic on a pipeline designed for transactional order events. These are fundamentally different patterns: one is triggered by a user action and must be delivered reliably to that specific user; the other is a broadcast to millions with acceptable delivery variance. Mixing them creates contention, makes prioritisation impossible, and means a marketing campaign can degrade order status updates for real customers. Firebase, Azure Notification Hubs, or similar purpose-built services handle mass broadcast at this scale by design.",
+      "seniorSays": "When a new requirement is 85x your current load and a different delivery pattern, the answer is almost never 'scale up the existing system.' It is 'this requirement needs its own system.' Protect your core pipeline."
+    }
+  ]
+}

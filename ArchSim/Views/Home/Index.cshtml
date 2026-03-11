@@ -1,0 +1,39 @@
+@model List<ScenarioSummary>
+@{
+    ViewData["Title"] = "Think";
+}
+
+<div class="home-page">
+    <header class="home-header">
+        <h1 class="home-title">Think</h1>
+        <p class="home-subtitle">Scenario Simulator for Engineers</p>
+        <p class="home-desc">Flight-simulator style scenarios. Real decisions. Immediate feedback.</p>
+    </header>
+
+    <section class="scenarios-section">
+        <div class="scenarios-grid">
+            @foreach (var s in Model)
+            {
+                <div class="scenario-card">
+                    <div class="card-top">
+                        <span class="card-category">@s.Category</span>
+                        <span class="difficulty-badge difficulty-@(s.Difficulty.ToLower().Replace(" ", "-").Replace("+", "plus"))">@s.Difficulty</span>
+                    </div>
+                    <h2 class="card-title">@s.Title</h2>
+                    <p class="card-description">@s.Description</p>
+                    <div class="card-meta">
+                        <span class="meta-item">⏱ @s.EstimatedMinutes min</span>
+                        <span class="meta-item">@s.TotalSteps steps</span>
+                    </div>
+                    <div class="card-tags">
+                        @foreach (var tag in s.Tags.Take(4))
+                        {
+                            <span class="tag-pill">@tag</span>
+                        }
+                    </div>
+                    <a href="/scenario/@s.Id" class="btn-start">Start Simulation →</a>
+                </div>
+            }
+        </div>
+    </section>
+</div>

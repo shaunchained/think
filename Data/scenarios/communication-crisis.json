@@ -1,0 +1,228 @@
+{
+  "id": "communication-crisis",
+  "title": "You caused the outage. Now you have to own it.",
+  "description": "A misconfigured deployment from your team took down a client-facing portal for 2 hours. The client is furious. Your manager is copied on everything. How you communicate in the next 24 hours will define how this is remembered.",
+  "type": "Stakeholder Communication",
+  "difficulty": "Senior",
+  "estimatedMinutes": 5,
+  "isAvailable": true,
+  "sequence": 6,
+  "steps": [
+    {
+      "stepNumber": 1,
+      "situation": "It is 2:18pm on a Tuesday. Your team deployed a configuration change to the client portal at 1:55pm. At 2:07pm the client's operations manager Priya sends an urgent message on the shared Slack channel: our portal has been completely down for 12 minutes, vendors cannot submit invoices, this is causing us serious business disruption. Your team identifies within minutes that the deployment introduced a bad environment variable that broke the database connection string. A rollback is already in progress and will take approximately 8 more minutes. Your manager Vikram is in the shared Slack channel and can see everything.",
+      "logs": [],
+      "question": "Priya has just messaged on Slack. Rollback is in progress and will take 8 minutes. What do you send right now?",
+      "options": [
+        {
+          "key": "A",
+          "text": "We are aware of the issue and are working on it. Will update shortly."
+        },
+        {
+          "key": "B",
+          "text": "Priya, we identified the root cause — a configuration error introduced in our 1:55pm deployment. We have initiated a rollback and expect the portal to be restored within 8 minutes. I will confirm the moment it is back. Apologies for the disruption."
+        },
+        {
+          "key": "C",
+          "text": "Do not respond on Slack yet. Call Priya directly so the conversation is not on a written channel where everything is documented."
+        },
+        {
+          "key": "D",
+          "text": "Wait until the rollback is complete and the portal is confirmed working before sending any message. Communicating mid-incident creates more anxiety than silence."
+        }
+      ],
+      "correctIndex": 1,
+      "explanation": "Option B is the only professional response. It acknowledges the issue, identifies the cause without deflecting, gives a concrete time estimate, commits to a follow-up, and apologizes — all in four sentences. Option A is vague and gives Priya nothing to work with. Option C is a red flag — avoiding written communication during an incident you caused looks like you are hiding something and will destroy trust far more than the outage itself. Option D is wrong because silence during an active incident is experienced as indifference by the client.",
+      "seniorSays": "First message during an incident you caused: acknowledge, explain briefly, give a time, commit to follow-up, apologize. Five elements, four sentences. Do not make them wait for basic information."
+    },
+    {
+      "stepNumber": 2,
+      "situation": "It is 2:31pm. The rollback completed successfully at 2:27pm. The portal is fully restored. Priya has confirmed her team can access it. The outage lasted 20 minutes. You now need to send a follow-up message on the shared Slack channel confirming resolution. Your manager Vikram messages you privately: keep it brief on Slack, we will do a proper writeup later.",
+      "logs": [],
+      "question": "Portal is restored. What do you send on the shared Slack channel as your resolution message?",
+      "options": [
+        {
+          "key": "A",
+          "text": "The portal has been restored as of 2:27pm. Root cause was a misconfigured environment variable in the 1:55pm deployment which affected the database connection. We have rolled back the change. We will share a full incident report by end of day tomorrow including what went wrong and how we will prevent recurrence. Apologies again for the disruption to your operations."
+        },
+        {
+          "key": "B",
+          "text": "Portal is back up. Sorry for the inconvenience."
+        },
+        {
+          "key": "C",
+          "text": "The portal has been restored. We are conducting a full internal investigation and will share findings once complete. We appreciate your patience."
+        },
+        {
+          "key": "D",
+          "text": "Hi Priya, the portal is restored as of 2:27pm. Today's incident was caused by human error during deployment. I want to personally apologize — this should not have happened and I take full responsibility. We are putting new processes in place to make sure this never happens again."
+        }
+      ],
+      "correctIndex": 0,
+      "explanation": "Option A hits every required element — restoration confirmed with timestamp, clear root cause in plain language, action taken, commitment to a written report with timeline, and a genuine apology focused on business impact. Option B is dismissive — 20 minutes of outage on a client-facing system is not an inconvenience. Option C sounds evasive — full internal investigation sounds like you are hiding something. Option D is too personal and emotional — taking personal responsibility is appropriate internally but publicly it sounds unprofessional and makes the client nervous about your team's competence.",
+      "seniorSays": "Resolution messages must include: confirmed restoration time, plain language root cause, action taken, next communication commitment with deadline, and a business-focused apology. Never vague, never defensive, never over-emotional."
+    },
+    {
+      "stepNumber": 3,
+      "situation": "It is 4:45pm. Priya's director Anand sends you a direct email — not on Slack. His tone is formal and unhappy. He writes that this is the second service disruption from your team in three months, that his team lost two hours of productive vendor onboarding time, and that he needs to understand what your team is doing differently to prevent this from happening again. He has CC'd his VP and your manager Vikram. You have not yet written the incident report.",
+      "logs": [],
+      "question": "Anand's email is formal, unhappy, CC'd to his VP and your manager. You do not have the incident report ready yet. How do you respond?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Do not reply until you have the full incident report ready. Responding without answers will invite more questions and make the situation worse."
+        },
+        {
+          "key": "B",
+          "text": "Reply immediately acknowledging receipt, validating his concern about the pattern of incidents, committing to a detailed written incident report by tomorrow EOD, and offering a short call with him and his team on Thursday to walk through it together."
+        },
+        {
+          "key": "C",
+          "text": "Reply with a detailed explanation of today's root cause and technical steps taken. Show thoroughness and technical competence to rebuild confidence."
+        },
+        {
+          "key": "D",
+          "text": "Forward the email to Vikram and ask him to handle this escalation since he is already copied and it is now a management-level conversation."
+        }
+      ],
+      "correctIndex": 1,
+      "explanation": "Option B is exactly right. A senior person has sent a formal email copied to his VP — leaving it unanswered for 18 hours while you write a report is disrespectful and looks like avoidance. You do not need the report to reply — you need to acknowledge, validate, commit, and offer a forum to discuss. Acknowledging the pattern of two incidents in three months directly is important — ignoring that line and only addressing today's outage will make Anand feel unheard. Option C is too technical for a director-level email about business impact. Option D is pure abdication and will damage your credibility with Vikram.",
+      "seniorSays": "Never leave a formal escalation email unanswered because you are not ready. Acknowledge it within the hour. You do not need answers to respond — you need to show you have heard them, you take it seriously, and you have a plan to follow up."
+    },
+    {
+      "stepNumber": 4,
+      "situation": "It is Wednesday morning. You are writing the incident report to send to Anand and his team by end of day. Your team lead suggests the report should focus on the positive — what you fixed quickly, how the rollback worked well, and the monitoring improvements you are planning. He says: no need to dwell on what went wrong, let's show them what we are doing right. You are not sure this is the right approach.",
+      "logs": [],
+      "question": "Your team lead wants the incident report to focus on positives and downplay what went wrong. What do you do?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Follow the team lead's guidance. He has more experience with client communication and a positive framing protects the team's reputation."
+        },
+        {
+          "key": "B",
+          "text": "Push back respectfully. An incident report that glosses over what went wrong will immediately read as defensive to a client who has already experienced two outages. It will destroy more trust than the outage did."
+        },
+        {
+          "key": "C",
+          "text": "Write two versions — a candid internal one and a more positive external one. Share the positive version with the client."
+        },
+        {
+          "key": "D",
+          "text": "Escalate to Vikram and ask him to mediate the disagreement about the report's framing before you write anything."
+        }
+      ],
+      "correctIndex": 1,
+      "explanation": "Pushing back here is the right call. Clients who have been burned twice are not looking for positivity — they are looking for honesty and evidence that you understand what went wrong and have genuinely fixed the process. A report that reads as spin will confirm their worst fears about your team. A well-structured blameless incident report that clearly explains the failure, the impact, the fix, and the systemic prevention is far more confidence-building than managed messaging. Option C is essentially lying by omission and will backfire. Option D is unnecessary escalation for a professional disagreement you are capable of handling.",
+      "seniorSays": "Clients who have experienced your failures do not need positivity. They need honesty. A clear-eyed incident report that says here is exactly what broke, here is why, and here is what we changed is infinitely more trust-building than a report that reads like a PR document."
+    },
+    {
+      "stepNumber": 5,
+      "situation": "You are now writing the incident report. You need to include a prevention section. Your team has identified three actions: adding a configuration validation step in the CI pipeline to catch bad environment variables before deployment, requiring a second engineer to verify environment configs on all production deployments, and adding an automated rollback trigger if error rate exceeds 5% within 10 minutes of a deployment. Your team lead says: do not commit to all three in the report — only commit to what you are certain you can deliver. He suggests listing just the CI pipeline check.",
+      "logs": [],
+      "question": "Team lead says commit to only one prevention item in the report. You have three solid actions identified. What do you include?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Follow the team lead's advice. Only commit to the CI pipeline check. Under-promise and over-deliver is always safer."
+        },
+        {
+          "key": "B",
+          "text": "Include all three prevention actions with realistic delivery timelines against each one. If you have identified them and they are achievable, committing to them demonstrates seriousness. Not committing to known fixes looks evasive."
+        },
+        {
+          "key": "C",
+          "text": "Include all three but frame them as items under consideration rather than firm commitments. This gives flexibility without appearing to hide anything."
+        },
+        {
+          "key": "D",
+          "text": "Ask the product manager to review and approve all three prevention items before including them in the client-facing report."
+        }
+      ],
+      "correctIndex": 1,
+      "explanation": "If you have three genuine, achievable prevention actions, committing to all three with clear timelines is the right move. A client who has experienced two incidents and reads a prevention section with one vague item will not feel confident. Showing three specific, concrete actions with timelines demonstrates that you have done a thorough analysis and are serious about prevention. The risk of under-committing is that it looks like you are doing the minimum. The team lead's instinct to under-promise makes sense in feature delivery but in a trust-recovery situation with a frustrated client, specificity and thoroughness rebuild confidence faster than caution.",
+      "seniorSays": "In trust recovery communication, vagueness is your enemy. If you know what you are fixing and when, say it. Clients are smart — a thin prevention section after a second incident reads exactly as thin as it is."
+    },
+    {
+      "stepNumber": 6,
+      "situation": "The incident report is complete and sent. Thursday morning, the call with Anand and his team takes place. There are six people on the call — Anand, his VP Sunita, two members of their operations team, Vikram your manager, and you. You are presenting the incident report. Anand starts the call by saying: before you begin, I want to say that our team's confidence in your platform has taken a serious hit. Two incidents in three months is not acceptable. Sunita is nodding. The room is tense.",
+      "logs": [],
+      "question": "Anand opens with a direct challenge about confidence and pattern of incidents. Sunita is nodding. How do you respond before starting the presentation?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Jump into the presentation immediately. The report will address his concerns and letting him vent more before you present will make the call harder to control."
+        },
+        {
+          "key": "B",
+          "text": "Acknowledge his statement directly and without defensiveness: Anand, you are right. Two incidents in three months is not the standard you should expect from us and it is not the standard we hold ourselves to. I am not going to start by explaining the incidents — I want to start by saying clearly that we have let your team down and we take that seriously. Then move into the presentation."
+        },
+        {
+          "key": "C",
+          "text": "Immediately point out the positive — your team identified and resolved today's incident in 20 minutes which is actually a strong response time. Frame it as evidence of a capable team."
+        },
+        {
+          "key": "D",
+          "text": "Let Vikram respond to the opening statement since he is the senior person from your side and this is now a management-level conversation about the relationship."
+        }
+      ],
+      "correctIndex": 1,
+      "explanation": "Option B is the only response that has any chance of changing the energy in the room. Anand and Sunita are not looking for a presentation yet — they are looking to feel heard. Acknowledging their frustration directly and without any qualification or defensiveness is the single most important thing you can do in the first 60 seconds. Option A will make you look tone-deaf. Option C will make you look defensive and will enrage them — they do not care about your rollback speed when they have experienced two outages. Option D is abdication at the worst possible moment — you are the one who caused the incident, you should own the room.",
+      "seniorSays": "When you walk into a room full of people who have been let down by your team, the first job is not to present. It is to acknowledge. People cannot hear your solutions until they feel heard. Sixty seconds of genuine acknowledgment changes the entire energy of the room."
+    },
+    {
+      "stepNumber": 7,
+      "situation": "The presentation goes well. The prevention plan is received positively. Sunita asks one final question: how will we know if these prevention measures are actually working? She is asking for some kind of ongoing visibility rather than waiting for the next incident to find out. Anand nods — he clearly agrees with the question. You had not prepared for this specific ask.",
+      "logs": [],
+      "question": "Sunita asks for ongoing visibility into whether your prevention measures are working. You were not prepared for this. What do you say?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Tell her that your monitoring systems will catch any future issues quickly and that response times will continue to improve. The prevention measures speak for themselves."
+        },
+        {
+          "key": "B",
+          "text": "Commit on the spot to a brief monthly update — a one-page summary showing deployment success rates, any incidents, and status of the three prevention actions. Offer to share the first one in 30 days."
+        },
+        {
+          "key": "C",
+          "text": "Tell her you will discuss internally and come back with a proposal for what visibility you can provide. Do not commit to anything you have not thought through."
+        },
+        {
+          "key": "D",
+          "text": "Suggest setting up shared access to your monitoring dashboard so they can check system health themselves at any time."
+        }
+      ],
+      "correctIndex": 1,
+      "explanation": "Option B is the right call even though you were not prepared. Sunita's ask is completely reasonable and the answer is obvious — a brief regular update showing deployment health and prevention action status is something any competent team can produce. Committing to it on the spot shows confidence and responsiveness. Option C sounds evasive after a tense trust-recovery meeting — leaving without a concrete answer to her final question undermines everything you built in the last hour. Option A is dismissive of a legitimate ask. Option D gives too much access and creates noise — they do not want to monitor your systems themselves, they want you to tell them what matters.",
+      "seniorSays": "When a client asks for visibility after a trust issue, give them a simple regular touchpoint. A one-page monthly update costs you 30 minutes and buys you enormous goodwill. Never leave a trust-recovery meeting without answering the visibility question."
+    },
+    {
+      "stepNumber": 8,
+      "situation": "The call ends well. Anand thanks you and says he appreciates the transparency. Two weeks later you send the first monthly update as promised — deployment success rate, zero incidents, two of three prevention measures implemented, third on track. Anand replies with a short thanks. A week after that, Priya — the operations manager — messages you on Slack: we have a new vendor portal module we want to build and we want your team to lead it. Vikram forwards you an email chain where Anand has recommended your team to another business unit director for a separate project.",
+      "logs": [],
+      "question": "Looking back at this entire situation — what was the single most important communication decision that turned a damaging incident into a stronger client relationship?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Responding to Priya's initial Slack message quickly with a clear time estimate. Speed of first response set the tone for everything that followed."
+        },
+        {
+          "key": "B",
+          "text": "Pushing back on the team lead's suggestion to write a positive-framing incident report. Honest reporting rebuilt trust faster than managed messaging would have."
+        },
+        {
+          "key": "C",
+          "text": "Acknowledging Anand's opening statement directly and without defensiveness on the Thursday call. That sixty-second moment changed the energy of the entire relationship."
+        },
+        {
+          "key": "D",
+          "text": "Committing to the monthly visibility update on the spot when Sunita asked. Proactive transparency after an incident is what separates vendors clients keep from vendors they replace."
+        }
+      ],
+      "correctIndex": 3,
+      "explanation": "All four options describe genuinely important decisions — this scenario was designed so that every step mattered. But the monthly visibility update is the answer that turned a crisis into a relationship advantage. Quick responses and honest reports are baseline expectations — they prevent further damage. Acknowledging feelings is essential but transient. The monthly update is the only action that continued working after the call ended. It demonstrated sustained accountability, gave Anand and Sunita evidence that your prevention measures actually worked, and transformed the relationship from reactive to proactive. Priya's new project request and Anand's referral were direct consequences of that ongoing visibility.",
+      "seniorSays": "Anyone can communicate well during a crisis. What separates trusted partners from forgettable vendors is what you do in the weeks after the crisis. Sustained proactive communication is the compound interest of trust."
+    }
+  ]
+}

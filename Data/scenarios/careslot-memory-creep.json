@@ -1,0 +1,201 @@
+{
+  "id": "careslot-memory-creep",
+  "title": "AppointmentService is eating memory. Quietly. Since the last sprint.",
+  "description": "CareSlot's AppointmentService has been growing in memory for 11 days. No crashes. No alerts. But the pattern started exactly when a new feature shipped. 2.1 million patients, 380 clinics, and the Apollo tenant alone driving 18% of daily load. You need to find it, quantify it, fix what matters — and explain to people who see a green dashboard why it is not fine.",
+  "type": "Performance Investigation",
+  "difficulty": "Senior",
+  "estimatedMinutes": 7,
+  "isAvailable": true,
+  "sequence": 7,
+  "steps": [
+    {
+      "stepNumber": 1,
+      "situation": "CareSlot runs AppointmentService as a .NET 8 Web API on Azure App Service. It handles booking, rescheduling, and cancellation for 380 clinics and 2.1 million patients. Eleven days ago, the team shipped a new feature: real-time slot availability — when a patient is on the booking page, the UI polls GET /slots?doctorId=&date= every 8 seconds to show live availability. The feature works. Patients love it. But you are doing a routine infrastructure review and you notice something in Azure Monitor. Before the feature shipped, AppointmentService memory held steady between 410MB and 460MB. Since the ship date it starts at 430MB after each daily recycle and climbs — 680MB after 8 hours, 950MB after 20 hours. The service is recycled every 24 hours by a scheduled App Service restart. No alerts have fired. The PM just shared a glowing Slack message about the new feature's positive patient feedback.",
+      "logs": [],
+      "question": "Memory climbing from 430MB to 950MB over 20 hours, started exactly when the real-time slot feature shipped. No alerts, no crashes, PM is happy. What is your first move?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Raise it immediately in the team standup. The correlation with the feature ship is too strong to ignore — the team needs to know now."
+        },
+        {
+          "key": "B",
+          "text": "Spend an hour verifying the pattern before saying anything. Pull Azure Monitor data for the 30 days before the feature ship and compare memory profiles across restarts. Confirm the baseline shift is real and consistent, not a one-off."
+        },
+        {
+          "key": "C",
+          "text": "Increase the App Service memory limit and add an alert at 1.8GB. The nightly recycle prevents crashes — monitor it and revisit if it worsens."
+        },
+        {
+          "key": "D",
+          "text": "Roll back the real-time slot feature immediately. The correlation is clear enough — remove it and restore the memory profile before investigating further."
+        }
+      ],
+      "correctIndex": 1,
+      "explanation": "Raising it in standup without verification turns a hypothesis into a fire drill. The PM just shipped a well-received feature — you need facts before you imply it has a problem. Rolling back without investigation removes a working feature based on correlation alone, not causation. Raising the memory limit kicks the can down the road on a production system serving 2.1 million patients. One hour of Azure Monitor data analysis will either confirm a real pattern or reveal a coincidence. You need that data before you say anything to anyone.",
+      "seniorSays": "Correlation is not a bug report. Spend an hour making it one. Walking into a conversation about a well-received feature with a hypothesis instead of data is how you lose the room before you start."
+    },
+    {
+      "stepNumber": 2,
+      "situation": "You pull 30 days of Azure Monitor memory data. The pattern is unambiguous. For the 19 days before the feature ship, memory after each restart settled between 410MB and 465MB and stayed flat within a 50MB band across the day. From day 1 after the ship, every single restart cycle shows the same climbing profile — slow but consistent. Growth rate: roughly 28MB per hour under normal load. During the 8am to 10am peak booking window, when slot availability polling intensifies across all clinics, the growth rate spikes to 65MB per hour. At that rate, if the nightly recycle ever fails or is delayed by more than 4 hours, AppointmentService will breach the App Service plan's 2GB memory limit and begin swapping — which on a shared App Service plan means severe latency degradation for all 380 clinics simultaneously. You attach a memory profiler to the staging environment and replay 2 hours of production-equivalent load — including the polling pattern from GET /slots.",
+      "logs": [],
+      "question": "Pattern confirmed: 28MB/hr baseline growth, 65MB/hr during peak polling. One missed recycle away from 2GB breach. You now have staging and a profiler. What do you investigate first?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Profile the GET /slots endpoint directly — it is the new code, it is the most-called endpoint at 420 req/sec during peak, and it is the only thing that changed."
+        },
+        {
+          "key": "B",
+          "text": "Take a baseline heap snapshot immediately after service start, let it run under load for 90 minutes, take a second snapshot, and diff the two. Let the data show you what is accumulating rather than assuming it is the slots endpoint."
+        },
+        {
+          "key": "C",
+          "text": "Check the Redis cache first. The slot availability feature heavily uses Azure Cache for Redis — a cache that is not evicting properly could be growing in application memory before serialisation."
+        },
+        {
+          "key": "D",
+          "text": "Review the git diff from the feature ship commit. Read the code changes line by line — the leak will be visible in the new code without needing a profiler."
+        }
+      ],
+      "correctIndex": 1,
+      "explanation": "Jumping straight to the slots endpoint assumes the answer. The git diff is useful but memory leaks in .NET are not always obvious from reading code — object lifetime issues, event subscriptions, and static collection growth often look innocent. Checking Redis before the heap is investigating the wrong layer — Redis memory is external to the process. A before-and-after heap snapshot diff is the definitive technique: it shows you exactly what object types are accumulating, in what quantity, with what retention path. Let the profiler tell you where to look rather than guessing.",
+      "seniorSays": "The profiler is not a confirmation tool for your hypothesis — it is a discovery tool. Take the snapshot diff first. If it confirms the slots endpoint, great. If it points somewhere else, you just saved yourself two hours of investigating the wrong thing."
+    },
+    {
+      "stepNumber": 3,
+      "situation": "You run the heap snapshot diff. After 90 minutes of load, the diff shows 3 object types accumulating with no sign of collection. First: SlotAvailabilityResult — a class that holds a list of available slots per doctor per date, created fresh on every GET /slots response. 14,800 instances still in memory after 90 minutes. Second: ClinicConfigSnapshot — a configuration object loaded per request from Redis and deserialised into memory. 8,200 instances. Third: CancellationTokenSource — one created per polling request, never disposed. 14,800 instances, matching the SlotAvailabilityResult count exactly. You trace the retention path. All three are held alive by a single static Dictionary called ActivePollingContexts in a class called SlotPollingCoordinator. The feature was built to track which patients are actively polling so duplicate polls could be de-duplicated. But the dictionary only adds entries — it has no eviction logic, no TTL, no cleanup. Every poll from every patient across all 380 clinics adds an entry that never leaves.",
+      "logs": [],
+      "question": "Root cause found: SlotPollingCoordinator.ActivePollingContexts is a static Dictionary with no eviction. 14,800 entries after 90 minutes. What is the right fix?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Replace the static Dictionary with a MemoryCache with a sliding expiration of 30 seconds. Entries evict automatically if a patient stops polling. Solves the leak without removing the de-duplication feature."
+        },
+        {
+          "key": "B",
+          "text": "Remove SlotPollingCoordinator entirely. The de-duplication optimisation is premature — GET /slots is already cached in Redis with a 5-minute TTL. Duplicate polls just hit the cache. The coordinator adds complexity and risk for marginal gain."
+        },
+        {
+          "key": "C",
+          "text": "Add a background cleanup job that runs every 60 seconds and removes entries older than 30 seconds from ActivePollingContexts. Minimal code change, targeted fix."
+        },
+        {
+          "key": "D",
+          "text": "Fix the CancellationTokenSource disposal first — that is the IDisposable violation and the most correctness-critical issue. The Dictionary can be addressed separately."
+        }
+      ],
+      "correctIndex": 1,
+      "explanation": "MemoryCache solves the leak but preserves code that may not need to exist. A background cleanup job introduces a second moving part — timing gaps between cleanup runs mean the dictionary still grows between sweeps, and the job itself needs monitoring. Fixing only the CancellationTokenSource disposal leaves the dictionary growing indefinitely. The right question is: does SlotPollingCoordinator need to exist at all? GET /slots responses are already cached in Redis with a 5-minute TTL. A duplicate poll is a Redis hit — sub-millisecond. The coordinator was built to solve a problem that Redis already solved. Removing it entirely eliminates the leak, the disposal bug, and 150 lines of unnecessary code in one decision.",
+      "seniorSays": "Before you fix a bug, ask whether the code that contains it needs to exist. The best fix is sometimes deletion. A system with less code has fewer places to leak."
+    },
+    {
+      "stepNumber": 4,
+      "situation": "You propose removing SlotPollingCoordinator entirely. The engineer who built the feature, Rohan, is on the code review. He pushes back: the coordinator was added because during load testing we saw Redis being hit 420 times per second from slot polling alone — I was worried about Redis connection saturation. You check the Azure Cache for Redis metrics for the past 11 days. Redis connection count during peak: 38 out of a 10,000 connection limit. Cache hit rate: 97.4%. The concern that motivated SlotPollingCoordinator was real during load testing — but the production numbers show it never materialised. You need to close this code review conversation.",
+      "logs": [],
+      "question": "Rohan's concern was valid during load testing but production data shows Redis is nowhere near saturation. How do you respond in the code review?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Acknowledge his concern, share the production Redis metrics directly in the review comment, and explain that the optimisation was solving a problem that does not exist in production. Propose removing the coordinator with a note to revisit if Redis metrics ever approach actual limits."
+        },
+        {
+          "key": "B",
+          "text": "Escalate to the team lead. Rohan built the feature and is blocking the fix — a senior decision is needed to break the deadlock."
+        },
+        {
+          "key": "C",
+          "text": "Merge your fix anyway. The production data is conclusive and the memory leak is a live risk on a system serving 380 clinics."
+        },
+        {
+          "key": "D",
+          "text": "Compromise — keep SlotPollingCoordinator but replace the Dictionary with MemoryCache as Rohan's de-duplication logic is preserved and the leak is fixed."
+        }
+      ],
+      "correctIndex": 0,
+      "explanation": "Escalating over a code review disagreement before using production data to resolve it is premature and signals a lack of confidence in your own finding. Merging without resolution bypasses the review process and damages trust. The compromise keeps unnecessary code alive. The right move is the simplest one: share the data that directly answers Rohan's concern — 38 of 10,000 Redis connections, 97.4% cache hit rate — in the code review itself. Rohan's concern was legitimate and deserves a legitimate response, not an override. Production numbers that contradict a load test assumption are exactly the conversation code reviews exist to have.",
+      "seniorSays": "Never override a colleague's technical concern — answer it. Rohan built something based on a real observation. Production data that contradicts that observation is not a dismissal of his judgment — it is new information you both now have. That is what good code reviews do."
+    },
+    {
+      "stepNumber": 5,
+      "situation": "Rohan is convinced. SlotPollingCoordinator is removed. The fix is reviewed, merged, and deployed to staging. You run the same 90-minute load test. Memory stays flat at 445MB. No accumulation. You are ready to deploy to production. But while preparing the deployment, your tech lead mentions that Apollo clinic — CareSlot's largest tenant, 18% of daily bookings, 22 million appointment rows in their schema — has their annual health camp tomorrow. They expect 3x their normal booking volume between 7am and 11am. Normal Apollo peak: 1,800 appointments per hour. Tomorrow's estimate: 5,400 per hour. Your deployment window is tonight at 10pm. If the deployment causes any issue, Apollo's health camp morning is the worst possible time to be recovering. Your tech lead asks: do we deploy tonight or wait until after the health camp?",
+      "logs": [],
+      "question": "Fix is ready and tested. Apollo's 3x load event is tomorrow 7am–11am. Deploy tonight at 10pm or wait until after the event?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Deploy tonight. The fix is tested, the leak is real, and at 65MB/hr during peak polling AppointmentService will be at dangerously high memory during Apollo's 3x event tomorrow morning. Deploying the fix tonight is the safer choice."
+        },
+        {
+          "key": "B",
+          "text": "Wait until after the health camp. The nightly recycle at midnight resets memory. Apollo's event runs 7am to 11am — only 7 hours after the recycle. Memory will reach 7 x 65MB = 455MB above baseline, well within the 2GB limit. Do not deploy the night before a major client event."
+        },
+        {
+          "key": "C",
+          "text": "Deploy tonight but keep the on-call engineer on standby with a rollback plan ready. Best of both worlds — fix is live, rollback available."
+        },
+        {
+          "key": "D",
+          "text": "Ask Apollo clinic to reschedule the health camp. A known memory leak risk during a 3x load event is not acceptable."
+        }
+      ],
+      "correctIndex": 1,
+      "explanation": "This is a risk calculation, not a philosophical debate. After midnight recycle, memory starts at 430MB. Apollo's event runs 7am to 11am — 7 hours later. At 65MB/hr peak growth, that is 430 + 455 = 885MB at event peak. The 2GB limit is not close. The nightly recycle is reliable — it has not been missed in 11 days of monitoring. Deploying a code change the night before a major client's biggest event of the year introduces unnecessary risk from the deployment itself — any regression, any missed test case, any environment-specific behaviour. The fix can wait 12 hours. The risk cannot, but the math says the risk is manageable until tonight.",
+      "seniorSays": "Good risk decisions require actual numbers, not instinct. Run the math before you deploy the night before a client's biggest event. The numbers here say wait. Trust the numbers."
+    },
+    {
+      "stepNumber": 6,
+      "situation": "Health camp completes successfully. Apollo processes 5,200 appointments between 7am and 11am — their highest single-day volume ever. AppointmentService memory at 10:45am: 891MB. Nightly recycle had run at midnight, exactly as expected. Fix deploys that evening without issues. Memory profile the next day: flat at 448MB after 8 hours. Leak resolved. Your engineering manager now asks you to present the full investigation at the next engineering all-hands — 35 engineers across backend, frontend, infra, and QA. He wants it to be a learning session, not just a post-mortem. You have 12 minutes. You open your notes. You have: Azure Monitor charts, heap snapshot diffs, Redis metrics, the SlotPollingCoordinator code, and the deployment risk calculation. What do you lead with?",
+      "logs": [],
+      "question": "12 minutes, 35 engineers, learning session format. What is the structure of your presentation?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Lead with the Azure Monitor memory chart — the visual pattern is compelling and immediately establishes why this mattered. Then walk through the investigation chronologically."
+        },
+        {
+          "key": "B",
+          "text": "Lead with the SlotPollingCoordinator code and the static Dictionary — show the bug first, then explain how it was found. Engineers want to see the code, not the charts."
+        },
+        {
+          "key": "C",
+          "text": "Lead with the decision that almost went wrong: deploying the night before Apollo's health camp. That is the moment with the most tension — it hooks the room and then you can rewind to explain what led there."
+        },
+        {
+          "key": "D",
+          "text": "Lead with the lesson: a static Dictionary with no eviction is a memory leak waiting to happen. Give the pattern first, then show the specific case as an example."
+        }
+      ],
+      "correctIndex": 2,
+      "explanation": "A learning session is not a technical report — it needs narrative tension to hold 35 engineers for 12 minutes. The Apollo deployment decision is the highest-stakes moment in the story and the one with the most universal resonance: every engineer in the room has faced a 'do we ship or do we wait' call before a major client event. Leading with that moment creates engagement, then you rewind to explain the investigation that led there. The memory chart is a good visual but a weak hook. The code is interesting to backend engineers but not the full room. The lesson-first structure is didactic and dry. Story structure with tension beats report structure every time.",
+      "seniorSays": "Technical presentations fail when they are structured like incident reports. Find the moment of highest tension in your story and lead with it. Every engineer in that room has had a deployment decision they were not sure about. Start there."
+    },
+    {
+      "stepNumber": 7,
+      "situation": "All-hands presentation goes well. Three engineers come up afterward and say they recognised the static collection pattern in other parts of the codebase. Your manager asks you to do a targeted code review across AppointmentService, ScheduleService, and ReportService for similar patterns — static collections, undisposed IDisposables, event handlers on long-lived objects. You spend two days reviewing. You find four more issues. Issue 1: ReportService holds a static List of completed report job IDs for deduplication — grows unbounded, currently 41,000 entries after 14 months. Issue 2: ScheduleService caches doctor leave records in a static Dictionary — no eviction, but leave data rarely changes so growth is slow. Issue 3: AppointmentService has two CancellationTokenSource instances in a batch processing loop that are created but never disposed — minor, no measurable memory impact. Issue 4: NotificationService has an event handler subscription pattern similar to the original leak but on a class that is instantiated only once per application lifetime — so there is effectively only one instance ever, making the leak negligible. You cannot fix all four this sprint. How do you triage?",
+      "logs": [],
+      "question": "Four issues found. One sprint. Not all fixable. How do you triage?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Fix all four. You found them, you own them, and leaving known issues in the codebase is how debt accumulates. Two days of work to close four issues is a good trade."
+        },
+        {
+          "key": "B",
+          "text": "Fix Issue 1 (ReportService static List, 41,000 entries, 14 months of growth) this sprint. Ticket Issues 2, 3, and 4 with clear severity ratings. Issue 2 is low-growth so P3. Issue 3 has no measurable impact so P4. Issue 4 is architecturally negligible so close it as won't fix with a documented reason."
+        },
+        {
+          "key": "C",
+          "text": "Fix Issues 1 and 3 this sprint — both are in AppointmentService and ScheduleService which you already have open. Issue 2 and 4 can be ticketed."
+        },
+        {
+          "key": "D",
+          "text": "Ticket all four and let the team prioritise in the next planning session. You should not be making unilateral triage decisions on issues across three services."
+        }
+      ],
+      "correctIndex": 1,
+      "explanation": "Fixing all four treats a P1, a P3, a P4, and a won't-fix as equally urgent — which is how engineers burn sprint capacity on low-value work. Fixing Issues 1 and 3 together because they are in the same services conflates codebase proximity with business priority — Issue 3 has no measurable impact while Issue 1 has 41,000 entries after 14 months and is still growing. Ticketing all four and deferring to planning is the right governance instinct but you have enough information to make three of these calls yourself right now. Issue 4 especially — documenting a won't-fix with a clear reason is a decision, not a deferral, and it is yours to make.",
+      "seniorSays": "Triage is not about fixing everything you find. It is about correctly classifying what you find. A well-reasoned won't-fix is as valuable as a fix — it tells the next engineer who finds the same thing that someone already thought about it."
+    }
+  ]
+}

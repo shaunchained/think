@@ -1,0 +1,201 @@
+{
+  "id": "who-can-see-what",
+  "title": "Everyone says 'just add roles'. You know what that really means.",
+  "description": "A permissions feature request lands on your plate. The stakeholders call it simple. The business head says 'just control who sees what'. But as you ask the right questions, you realise the wrong architecture here will be rewritten in 18 months — by someone cursing your name.",
+  "type": "Auth & Permissions",
+  "difficulty": "Senior",
+  "estimatedMinutes": 6,
+  "isAvailable": true,
+  "sequence": 2,
+  "steps": [
+    {
+      "stepNumber": 1,
+      "situation": "You are a senior engineer at a B2B SaaS company. The product is a project management tool used by enterprise clients. The Business Head walks up to you and says: we are losing deals because we do not have proper access control. Clients want to control who sees what. Just add roles — Admin, Manager, Viewer. Should be a two-week job. The sales team has been promising this feature for months. Your current system has zero permissions logic — every logged-in user sees everything within their organisation. You have roughly 4,200 organisations on the platform, each with 5 to 80 users. No two enterprise clients who asked for this feature described it the same way.",
+      "logs": [],
+      "question": "The Business Head says 'just add three roles — Admin, Manager, Viewer'. What is your first move?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Start designing the roles table and permissions schema. Three roles is a well-understood pattern — get the implementation going and validate with stakeholders as you build."
+        },
+        {
+          "key": "B",
+          "text": "Push back immediately. Role-based access control is never a two-week job on a live system with 4,200 organisations. Ask for a month-long discovery phase before any code is written."
+        },
+        {
+          "key": "C",
+          "text": "Schedule conversations with two or three of the enterprise clients who specifically asked for this feature. You need to hear their actual use cases before touching the schema — because 'roles' might mean very different things to different clients."
+        },
+        {
+          "key": "D",
+          "text": "Research RBAC vs ABAC vs ReBAC patterns first. Pick the right model before talking to anyone — requirements will change anyway, so the architecture needs to be flexible from day one."
+        }
+      ],
+      "correctIndex": 2,
+      "explanation": "The Business Head's framing — three roles, two weeks — is a solution, not a requirement. The actual requirement is 'clients want to control who sees what' and that is dangerously vague. Building a schema based on a stakeholder's assumed solution is how you ship the wrong architecture. Talking directly to the clients who asked for it surfaces the real use cases. Two clients might describe completely different permission models using the exact same word: roles.",
+      "seniorSays": "When a non-technical stakeholder gives you a solution instead of a requirement, your first job is to find the requirement hiding behind it. 'Just add roles' is not a requirement — it is a guess."
+    },
+    {
+      "stepNumber": 2,
+      "situation": "You speak to three enterprise clients. Client A — a 200-person consulting firm — says: we want Admins to manage billing and settings, Managers to create and assign tasks, Viewers to only read. Sounds like three roles. Client B — a 600-person logistics company — says: we need project-level permissions. A person can be a Manager on Project X but only a Viewer on Project Y. Same person, different roles on different projects. Client C — a 400-person healthcare firm — says: we need department-based access. The HR department should never see the Finance department's projects, even if both users are Managers. You now have three clients, three fundamentally different permission models. The Business Head is waiting for your architecture proposal.",
+      "logs": [],
+      "question": "Three clients, three different permission models — global roles, project-level roles, department-based isolation. What do you recommend to the Business Head?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Build for Client A first — global roles is the simplest model and covers the most common case. Extend later for project-level and department-based needs."
+        },
+        {
+          "key": "B",
+          "text": "Tell the Business Head there are three distinct permission models in play, not one. Recommend building a flexible permission architecture that can support all three — but be honest that this is not a two-week job. Present the cost of getting this wrong now versus the cost of rewriting it in 18 months."
+        },
+        {
+          "key": "C",
+          "text": "Build a highly generic permissions engine that can model any access pattern. Maximum flexibility upfront means you will never need to rethink the architecture."
+        },
+        {
+          "key": "D",
+          "text": "Pick the most complex model — department-based isolation — and build for that. If it handles Client C, it will handle Clients A and B too."
+        }
+      ],
+      "correctIndex": 1,
+      "explanation": "Building for Client A first creates a global roles schema. When Client B needs project-level roles six months later, that schema needs significant rework — not extension. Building a maximally generic permissions engine upfront is over-engineering that will slow you down and produce a system nobody understands. Building for the most complex case assumes all complexity is additive — it is not. The right answer is to name the three models clearly to the Business Head, show what each costs to build, and show what it costs to get it wrong. That is how a senior engineer earns the right to do it properly.",
+      "seniorSays": "Your job in this meeting is not to say yes or no — it is to make the Business Head understand what they are actually deciding. Three permission models is not a two-week job. It is an architecture decision that will affect every feature you build for the next three years."
+    },
+    {
+      "stepNumber": 3,
+      "situation": "The Business Head agrees to a proper design phase. After discussion, the three of you align on a target architecture: role assignments will be scoped — a user can have a role at the organisation level, the project level, or the department level. You begin designing the schema. You have two options on the table. Option 1: a flat permissions table — each row stores user ID, role, resource type, and resource ID. Simple to query, easy to understand, but every permission check hits the database. Option 2: a hierarchical model — permissions are inherited down a resource tree. Organisation-level roles cascade to projects unless overridden. Fewer rows, more expressive — but permission resolution requires tree traversal and caching logic. Your platform currently handles around 800 permission checks per second at peak.",
+      "logs": [],
+      "question": "Flat permissions table vs hierarchical inheritance model. You are at 800 permission checks per second at peak. Which do you recommend and why?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Flat table. Simple to query, simple to audit, simple to debug. At 800 checks per second, add a Redis cache in front and it will scale fine. Complexity is the enemy of a system you have to maintain for years."
+        },
+        {
+          "key": "B",
+          "text": "Hierarchical model. It maps directly to how clients think about permissions — org level cascades to projects. Fighting that mental model with a flat table will create confusing edge cases in the application logic."
+        },
+        {
+          "key": "C",
+          "text": "Start with the flat table for the initial three clients. Migrate to hierarchical once you understand the real query patterns under production load."
+        },
+        {
+          "key": "D",
+          "text": "Use both — flat table as the source of truth, hierarchical model as a materialised cache that gets rebuilt on permission changes. Best of both worlds."
+        }
+      ],
+      "correctIndex": 0,
+      "explanation": "At 800 permission checks per second, a flat table with a well-keyed cache is fast, auditable, and debuggable. The hierarchical model maps to how clients think, but it moves complexity from the schema into the application's resolution logic — and that logic will have edge cases that only appear in production. Flat tables are also trivially auditable: every permission is an explicit row, not an inherited assumption. Starting flat and caching is a proven pattern at this scale. The hybrid option sounds clever but creates two sources of truth, which always produces subtle bugs.",
+      "seniorSays": "In permissions systems, explicitness beats elegance. A flat table where every permission is a visible row is a system you can debug at 2am. A hierarchical inheritance model where permissions appear by traversal is a system where nobody is sure what a user can actually see."
+    },
+    {
+      "stepNumber": 4,
+      "situation": "Schema decided — flat permissions table with Redis cache. You start building. Three weeks in, the Product Manager comes to you with a new request from the sales team: prospects are asking whether they can create custom roles — not just Admin, Manager, Viewer, but names like 'Regional Lead', 'Auditor', 'Contractor'. Each custom role should have a configurable set of permissions. This is a materially different feature from what you designed. Your current schema stores role as an enum — Admin, Manager, Viewer — directly on the permissions row. Supporting custom roles means roles need to become a first-class entity with their own table, their own permission sets, and their own management UI. You are three weeks into a six-week build.",
+      "logs": [],
+      "question": "Three weeks in, the requirement changes — custom roles are now needed. Your schema stores role as an enum. What do you do?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Absorb it. Refactor the enum to a roles table now — you are only three weeks in and catching this early is cheaper than catching it at launch."
+        },
+        {
+          "key": "B",
+          "text": "Push back hard. This is scope creep. The original spec was three fixed roles. Implement custom roles as a phase 2 after launch."
+        },
+        {
+          "key": "C",
+          "text": "Assess the blast radius first. Map exactly which tables, queries, and application logic reference the role enum, estimate the refactor cost, then bring a clear proposal to the PM — not a yes, not a no."
+        },
+        {
+          "key": "D",
+          "text": "Design the custom roles feature in parallel on a separate branch. Do not disrupt the current build — merge it after the initial launch."
+        }
+      ],
+      "correctIndex": 2,
+      "explanation": "Saying yes immediately without assessment is how engineers absorb scope creep and miss deadlines. Saying no flatly ignores a legitimate requirement that will come back after launch as a painful migration. Building in parallel sounds clever but creates a merge conflict of architectural proportions. The right move is to do the blast radius analysis first: how many places reference the role enum? How long does the refactor take? With that data, you can have an honest conversation with the PM about what it costs to do it now versus later — and they can make an informed decision.",
+      "seniorSays": "Never say yes or no to a schema change without first counting how many things it touches. Blast radius analysis is not procrastination — it is the information that turns a guess into a decision."
+    },
+    {
+      "stepNumber": 5,
+      "situation": "Blast radius assessed. Refactoring the role enum to a proper roles table touches 14 database queries, 6 API endpoints, and 3 UI components. Estimated cost: 4 days of engineering work plus 2 days of QA. The PM agrees it is worth doing now — catching it post-launch would cost far more. You refactor. Custom roles are now a first-class entity. Two weeks later, you are nearly done. A new question surfaces during a code review: when a user is deleted from the system, what happens to their permission rows? And when a project is deleted, what happens to the permissions scoped to that project? Nobody defined this. There is no product spec for it. The code review is blocking a PR merge.",
+      "logs": [],
+      "question": "Deleted users and deleted projects — nobody defined what happens to their permission rows. Code review is blocked. What do you do?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Cascade deletes — when a user or project is deleted, all associated permission rows are deleted automatically via foreign key constraints. Clean and simple."
+        },
+        {
+          "key": "B",
+          "text": "Soft deletes — mark permission rows as inactive rather than deleting them. Preserves audit history and makes accidental deletions recoverable."
+        },
+        {
+          "key": "C",
+          "text": "Stop and get a product decision before writing any code. Deletion behaviour in a permissions system has compliance and audit implications — this is not a purely technical call."
+        },
+        {
+          "key": "D",
+          "text": "Cascade delete for project permissions, soft delete for user permissions. Users leaving the org is an auditable event, project deletions are routine cleanup."
+        }
+      ],
+      "correctIndex": 2,
+      "explanation": "This looks like a technical decision but it is not. Cascade deletes are irreversible. Soft deletes preserve audit trails. For enterprise clients — especially Client C in the healthcare sector — permission history may be a compliance requirement, not a nice-to-have. The engineer who picks cascade deletes to unblock the PR and moves on might be creating a HIPAA audit problem six months later. The right move is to surface the question to the PM with context: here are the two options, here is what each means for audit trails and compliance, what does the business need? Unblocking a PR is never worth making an irreversible architectural decision alone.",
+      "seniorSays": "Deletion behaviour in a permissions system is a compliance question wearing a technical costume. Never answer it alone. The five minutes it takes to ask the PM could save you from an audit finding that takes months to remediate."
+    },
+    {
+      "stepNumber": 6,
+      "situation": "PM confirms: soft deletes for both — the company may pursue SOC 2 compliance next year and audit trails will be required. You implement soft deletes with an archived_at timestamp. The feature launches. Three months pass. Everything is stable. Then the infrastructure team comes to you with a performance concern: the permissions cache in Redis is growing. Currently 2.1 GB. Projected to hit Redis memory limits in four months at the current growth rate. The cache stores fully resolved permission sets per user — every resource a user can access, serialised and cached on login. Average user has permissions across 40 to 200 resources. You have 61,000 active users.",
+      "logs": [],
+      "question": "Redis permissions cache is growing toward memory limits. Fully resolved permission sets per user, 61,000 active users. How do you address this?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Increase Redis memory allocation. It is the cheapest and fastest fix — buy time while you design a better solution."
+        },
+        {
+          "key": "B",
+          "text": "Switch from caching full permission sets to caching individual permission checks — only cache the result of 'can user X do action Y on resource Z' as it is checked, with a short TTL. Lazy population instead of eager serialisation on login."
+        },
+        {
+          "key": "C",
+          "text": "Remove the cache entirely and optimise the flat permissions table with better indexing. At 61,000 users the table is not that large — a well-indexed query should be fast enough."
+        },
+        {
+          "key": "D",
+          "text": "Add cache eviction — expire full permission sets after 24 hours and rebuild on next login. Controls memory growth without changing the caching strategy."
+        }
+      ],
+      "correctIndex": 1,
+      "explanation": "Increasing memory is a short-term patch that delays the same problem. Removing the cache entirely ignores why it was added — 800 permission checks per second at peak is real load. TTL eviction controls size but still stores bloated full permission sets — a user with 200 resources has a large cache entry regardless of how often it is evicted. Lazy population is the right architectural shift: only cache what is actually checked, when it is checked, with a short TTL. This means the cache size is proportional to active usage patterns, not to the total permission graph — and it scales naturally as the user base grows.",
+      "seniorSays": "A cache that stores everything a user could possibly access is a cache that grows with your data model. A cache that stores only what users actually check grows with your traffic patterns. One scales with your database. The other scales with your users' behaviour. Know the difference."
+    },
+    {
+      "stepNumber": 7,
+      "situation": "Cache strategy fixed. The system is performing well. One year after launch, the company signs its largest enterprise client yet — 3,200 users across 14 countries. During the onboarding call, their CTO asks one question: can your permissions system support attribute-based rules? For example — a user in Germany should only see projects tagged as EU region, regardless of their role. Your current system is purely role-based — permissions are tied to roles and resource IDs, not to attributes of the resources themselves. Adding attribute-based access control on top of your existing architecture is possible, but it would require adding a rules engine, an attribute store, and modifying every permission check in the system.",
+      "logs": [],
+      "question": "Your biggest client wants attribute-based access control. Your system is purely role-based. What is your response to the CTO on the call?",
+      "options": [
+        {
+          "key": "A",
+          "text": "Yes, we can support that. Commit to it on the call — this is your largest client and losing them over a technical limitation is not an option."
+        },
+        {
+          "key": "B",
+          "text": "Not today, but it is on our roadmap. Give a vague commitment to avoid losing the deal without making a specific promise you cannot keep."
+        },
+        {
+          "key": "C",
+          "text": "Be direct: your current system is role-based and attribute-based rules are not supported today. Ask the CTO to walk you through their specific use cases — there may be a way to model region-based access within the existing role and resource scoping model without a full ABAC engine."
+        },
+        {
+          "key": "D",
+          "text": "Tell the CTO it is a six-month engineering investment and quote a timeline. Transparency builds trust with enterprise clients."
+        }
+      ],
+      "correctIndex": 2,
+      "explanation": "Saying yes on the call to close the deal creates a commitment your engineering team has not agreed to. Vague roadmap promises damage trust when they do not materialise. Quoting a six-month timeline without any analysis is a number you invented. The right move is honesty plus curiosity: your system does not support ABAC today, but before you call it a hard blocker, understand the actual use case. Region-based project visibility might be achievable by scoping role assignments to resource groups tagged by region — without a full rules engine. Never assume the most expensive solution is the only one until you have heard the real requirement.",
+      "seniorSays": "Enterprise clients respect engineers who say 'not today, but tell me more' far more than engineers who say yes and disappear for six months. Curiosity is more valuable than commitment when you do not yet know the cost."
+    }
+  ]
+}

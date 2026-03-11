@@ -1,0 +1,94 @@
+@model thinking1.Models.SessionResult
+@{
+    ViewData["Title"] = $"Your Score — {Model.ScenarioTitle}";
+    var shareText = Uri.EscapeDataString($"I scored {Model.CorrectAnswers}/{Model.TotalQuestions} ({Model.ScorePercent}%) on \"{Model.ScenarioTitle}\" — {Model.ScoreTitle}. Test your engineering judgment at think.thetruecode.com");
+    var shareUrl = Uri.EscapeDataString("https://think.thetruecode.com");
+    var linkedInShareUrl = $"https://www.linkedin.com/sharing/share-offsite/?url={shareUrl}&summary={shareText}";
+}
+
+<div class="result-page">
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-lg-8">
+
+                <!-- SCORE SUMMARY -->
+                <div class="score-summary text-center mb-5">
+                    <div class="score-display">
+                        <span class="score-number">@Model.CorrectAnswers</span>
+                        <span class="score-divider"> out of </span>
+                        <span class="score-total">@Model.TotalQuestions</span>
+                    </div>
+                    <div class="score-percent-badge">@Model.ScorePercent%</div>
+                    <h1 class="score-title">@Model.ScoreTitle</h1>
+                    <p class="score-description">@Model.ScoreDescription</p>
+                </div>
+
+                <!-- ACTION BUTTONS -->
+                <div class="result-actions d-flex flex-wrap gap-3 justify-content-center mb-5">
+                    <a href="/" class="btn btn-outline-custom">Try Another Scenario</a>
+                    <a href="@linkedInShareUrl" target="_blank" rel="noopener" class="btn btn-linkedin">
+                        Share on LinkedIn
+                    </a>
+                    <a href="https://www.thetruecode.com" target="_blank" rel="noopener" class="btn btn-outline-custom">Read the Blog</a>
+                </div>
+
+                <!-- REVIEW DIVIDER -->
+                <div class="review-heading-row mb-4">
+                    <h2 class="review-heading">Full Question Review</h2>
+                    <p class="review-subheading">Every question, your answer, and what a senior engineer would do.</p>
+                </div>
+
+                <!-- ANSWER REVIEW LIST -->
+                @foreach (var answer in Model.Answers)
+                {
+                    <div class="review-card @(answer.IsCorrect ? "review-card--correct" : "review-card--wrong") mb-4">
+                        <div class="review-card-header">
+                            <span class="review-step-num">Q@(answer.StepNumber)</span>
+                            @if (answer.IsCorrect)
+                            {
+                                <span class="review-result review-correct">✓ Correct</span>
+                            }
+                            else
+                            {
+                                <span class="review-result review-wrong">✗ Incorrect</span>
+                            }
+                        </div>
+
+                        <p class="review-question">@answer.Question</p>
+
+                        <div class="review-answers">
+                            <div class="review-answer-row @(answer.IsCorrect ? "answer-correct" : "answer-wrong")">
+                                <span class="answer-label">Your answer:</span>
+                                <span class="answer-text">@answer.SelectedOptionText</span>
+                            </div>
+                            @if (!answer.IsCorrect)
+                            {
+                                <div class="review-answer-row answer-correct">
+                                    <span class="answer-label">Correct answer:</span>
+                                    <span class="answer-text">@answer.CorrectOptionText</span>
+                                </div>
+                            }
+                        </div>
+
+                        <div class="review-explanation">
+                            <p>@answer.Explanation</p>
+                        </div>
+
+                        <blockquote class="review-senior-quote">
+                            @answer.SeniorSays
+                        </blockquote>
+                    </div>
+                }
+
+                <!-- BOTTOM ACTIONS -->
+                <div class="result-actions d-flex flex-wrap gap-3 justify-content-center mt-4 mb-5">
+                    <a href="/" class="btn btn-outline-custom">Try Another Scenario</a>
+                    <a href="@linkedInShareUrl" target="_blank" rel="noopener" class="btn btn-linkedin">
+                        Share on LinkedIn
+                    </a>
+                </div>
+
+            </div>
+        </div>
+    </div>
+</div>

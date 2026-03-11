@@ -1,0 +1,512 @@
+{
+  "id": "build-user-registration-api",
+  "title": "Build a User Registration API — The Right Way",
+  "category": "API Design & Security Fundamentals",
+  "difficulty": "0-3 yrs",
+  "sequence": 1,
+  "estimatedMinutes": 6,
+  "description": "You have been asked to build a user registration API. Sounds simple. But every decision you make — status codes, validation, password storage, response design, error handling, rate limiting — has a right way and a wrong way. Navigate the six decisions that every junior engineer gets wrong at least once.",
+  "tags": [ "REST API", "Security", "Validation", "Password Hashing", "Error Handling", "Rate Limiting" ],
+
+  "interviewer": {
+    "name": "Neha Joshi",
+    "role": "Senior Backend Engineer",
+    "avatar": "NJ"
+  },
+
+  "steps": [
+    {
+      "stepNumber": 1,
+      "interviewerSays": "You build the registration endpoint — POST /api/users. A user submits their details and is registered successfully. What HTTP status code do you return, and why does it matter which code you choose?",
+      "context": "This tests whether the junior engineer understands that HTTP status codes are a contract — not just numbers. Most juniors return 200 for everything because it works. The correct answer is 201 Created with a specific reason.",
+      "type": "single-choice",
+      "options": [
+        {
+          "id": "A",
+          "text": "I would return 200 OK — the request succeeded and the user was registered, so 200 means success. The client just needs to know it worked, the exact code does not matter much as long as it is in the 2xx range",
+          "score": 2,
+          "tag": "Too Vague",
+          "tagColor": "orange",
+          "interviewerReaction": "200 OK means the request was processed successfully but nothing was necessarily created. When you create a new resource — a user, an order, a post — the correct code is 201 Created. This distinction matters because client code, automated tools, and API gateways behave differently based on status codes. A 201 also conventionally includes a Location header telling the client where the new resource lives. Why does that precision matter in a real API?"
+        },
+        {
+          "id": "B",
+          "text": "I would return 201 Created — this specifically signals that a new resource was created as a result of the request, which is more precise than 200 OK. I would also include a Location header pointing to the new user resource, for example Location: /api/users/123",
+          "score": 10,
+          "tag": "Excellent",
+          "tagColor": "green",
+          "interviewerReaction": "Exactly right. 201 Created is the precise signal for resource creation, and the Location header follows REST conventions correctly. Now — what happens when the user submits the form with an empty email field, or a password that is only 3 characters long? How do you handle invalid input?"
+        },
+        {
+          "id": "C",
+          "text": "I would return 200 OK for success and 500 Internal Server Error if anything goes wrong during registration — this covers both the success and failure cases cleanly",
+          "score": 1,
+          "tag": "Incorrect",
+          "tagColor": "orange",
+          "interviewerReaction": "Returning 500 for invalid user input is a significant mistake. 500 means something went wrong on YOUR server — a crash, an unhandled exception, a bug. Invalid user input like a missing email is the CLIENT's fault, not the server's. The correct code for invalid input is 400 Bad Request or 422 Unprocessable Entity. Using 500 for client errors hides real server errors in your logs and makes debugging a nightmare."
+        }
+      ],
+      "idealAnswer": {
+        "summary": "HTTP status codes are a contract between your API and everyone who calls it. 201 Created precisely communicates that a new resource was created. Using 200 for everything or 500 for client errors breaks this contract and makes your API harder to consume, debug, and monitor.",
+        "sections": [
+          {
+            "type": "text",
+            "heading": "HTTP Status Codes Are a Language",
+            "content": "Status codes are not just numbers — they are a shared language between your API and its consumers. Every client, monitoring tool, API gateway, and load balancer understands what these codes mean and behaves accordingly.\n\nThe three ranges you must know as a junior:\n\n2xx — Success: The request worked.\n→ 200 OK: Request succeeded, resource returned or updated\n→ 201 Created: A new resource was created\n→ 204 No Content: Request succeeded, nothing to return (used for DELETE)\n\n4xx — Client Error: The caller did something wrong.\n→ 400 Bad Request: Invalid input, malformed request\n→ 401 Unauthorized: Not authenticated — who are you?\n→ 403 Forbidden: Authenticated but not allowed — I know who you are, you just cannot do this\n→ 404 Not Found: Resource does not exist\n→ 409 Conflict: Request conflicts with existing state (e.g. email already registered)\n→ 422 Unprocessable Entity: Input is syntactically valid but semantically wrong\n\n5xx — Server Error: YOU did something wrong.\n→ 500 Internal Server Error: Unhandled exception, bug, crash\n→ 503 Service Unavailable: Server is down or overloaded"
+          },
+          {
+            "type": "architecture-block",
+            "heading": "Registration Endpoint Response Design",
+            "content": "  POST /api/users\n  Body: { email, password, name }\n\n  SUCCESS RESPONSE:\n  ─────────────────────────────────────\n  HTTP 201 Created\n  Location: /api/users/uuid-1234\n  Content-Type: application/json\n\n  {\n    \"id\":        \"uuid-1234\",\n    \"name\":      \"John Smith\",\n    \"email\":     \"john@example.com\",\n    \"createdAt\": \"2024-03-10T14:30:00Z\"\n  }\n\n  EMAIL ALREADY EXISTS:\n  ─────────────────────────────────────\n  HTTP 409 Conflict\n  {\n    \"error\":   \"EMAIL_ALREADY_EXISTS\",\n    \"message\": \"An account with this email already exists\"\n  }\n\n  INVALID INPUT:\n  ─────────────────────────────────────\n  HTTP 400 Bad Request\n  {\n    \"error\":  \"VALIDATION_ERROR\",\n    \"fields\": {\n      \"email\":    \"Email is required\",\n      \"password\": \"Password must be at least 8 characters\"\n    }\n  }\n\n  SERVER CRASH (unhandled exception):\n  ─────────────────────────────────────\n  HTTP 500 Internal Server Error\n  {\n    \"error\":   \"INTERNAL_ERROR\",\n    \"message\": \"Something went wrong. Please try again.\"\n  }\n  NOTE: Never expose exception details in 500 responses"
+          },
+          {
+            "type": "key-principles",
+            "heading": "Key Principles",
+            "items": [
+              "201 Created + Location header is the correct response for any endpoint that creates a new resource",
+              "4xx codes are for client mistakes — missing fields, invalid format, duplicate email, wrong password",
+              "5xx codes are for server mistakes — bugs, crashes, timeouts, infrastructure failures",
+              "Using 500 for client errors pollutes your error monitoring — real server crashes get buried in noise",
+              "409 Conflict is the correct code when a duplicate resource already exists — not 400 and not 500"
+            ]
+          },
+          {
+            "type": "warning",
+            "heading": "The 200 Everything Anti-Pattern",
+            "content": "Many APIs — especially older ones — return 200 OK for every response and put the real success or failure information inside the response body: { success: false, error: 'Email already exists' }.\n\nThis breaks every tool that relies on status codes: monitoring dashboards that track error rates, load balancers that detect unhealthy backends, API clients that handle errors generically, and automated retry logic that should retry 503s but not 409s.\n\nReturn the right status code. Always. The body is for details. The status code is for classification."
+          },
+          {
+            "type": "tradeoffs",
+            "heading": "Trade-offs",
+            "pros": [
+              "Correct status codes make your API self-documenting — a developer can understand what happened without reading the response body",
+              "Monitoring tools automatically track error rates by status code — 4xx rate and 5xx rate become meaningful metrics",
+              "Client code can handle errors generically — catch all 4xx as client errors, all 5xx as server errors"
+            ],
+            "cons": [
+              "Requires discipline across the entire team — one developer returning 200 for errors breaks the contract",
+              "Some edge cases are genuinely ambiguous — 400 vs 422 vs 409 requires deliberate choice and documentation"
+            ]
+          }
+        ],
+        "oneLineSummary": "HTTP status codes are a contract — 201 for creation, 4xx for client mistakes, 5xx for server mistakes. Breaking this contract makes your API harder to use, debug, and monitor."
+      }
+    },
+    {
+      "stepNumber": 2,
+      "interviewerSays": "Good. Now a user submits the registration form with an empty email, a name that is 500 characters long, and a password of '123'. How do you handle input validation — what do you validate, where do you validate it, and what do you return to the user?",
+      "context": "Input validation is the first line of defence for any API. Many juniors either skip validation entirely, validate only on the frontend, or validate in the wrong layer. The correct answer covers what to validate, validating on the server always, and returning actionable error messages.",
+      "type": "single-choice",
+      "options": [
+        {
+          "id": "A",
+          "text": "The frontend already validates the form before submitting — empty fields and short passwords are caught before the request reaches the API. Server-side validation is redundant and adds unnecessary complexity",
+          "score": 0,
+          "tag": "Dangerous",
+          "tagColor": "orange",
+          "interviewerReaction": "Frontend validation is purely a UX convenience — it can be bypassed by anyone with a browser developer tool, Postman, or a simple curl command. Never trust any input that comes from outside your server. A malicious user can disable JavaScript, modify the request in transit, or call your API directly without using your frontend at all. Server-side validation is not optional — it is the only validation that actually protects your system."
+        },
+        {
+          "id": "B",
+          "text": "I would validate on the server regardless of what the frontend does — check that email is present and valid format, name has a reasonable maximum length, and password meets minimum requirements. I would validate all fields before doing anything else, collect all validation errors together, and return them in a single 400 response so the user can fix everything at once rather than one error at a time",
+          "score": 10,
+          "tag": "Excellent",
+          "tagColor": "green",
+          "interviewerReaction": "Perfect. Server-side always, validate all fields upfront, return all errors together. That last point matters more than people realise — returning one error at a time forces the user to submit the form multiple times to discover all their mistakes. How do you store the password once validation passes?"
+        },
+        {
+          "id": "C",
+          "text": "I would try to save the data and let the database handle validation — the database has constraints like NOT NULL and VARCHAR length limits that will reject invalid data and throw an exception, which I can catch and return as an error",
+          "score": 3,
+          "tag": "Wrong Layer",
+          "tagColor": "orange",
+          "interviewerReaction": "Database constraints are a safety net, not a validation strategy. A database error is a raw technical message — it tells you a constraint was violated but not what the user should do to fix it. You cannot return a database exception message to a user and expect them to understand it. Validation belongs in your application layer where you control the language, the detail, and the format of the error response."
+        }
+      ],
+      "idealAnswer": {
+        "summary": "Server-side validation is mandatory — frontend validation is a UX convenience that any user can bypass. Validate all fields before processing, collect all errors together, and return them in a single human-readable response. Never rely on database constraints as your primary validation layer.",
+        "sections": [
+          {
+            "type": "text",
+            "heading": "Why Server-Side Validation is Non-Negotiable",
+            "content": "Your API is a public contract. Anyone can call it — your own frontend, a mobile app, another service, a developer testing with Postman, or a malicious actor probing for weaknesses. The frontend has no authority to guarantee what reaches your server.\n\nFrontend validation is for user experience — it gives instant feedback without a round trip to the server. Server-side validation is for correctness and security — it is the only enforcement that cannot be bypassed.\n\nEvery piece of data that enters your system from outside must be validated on the server. No exceptions."
+          },
+          {
+            "type": "architecture-block",
+            "heading": "What to Validate on Registration",
+            "content": "  FIELD VALIDATION RULES:\n  ┌─────────────────────────────────────────────┐\n  │  email                                      │\n  │  → Required: cannot be null or empty        │\n  │  → Format: must match email pattern         │\n  │  → Max length: 254 characters (RFC 5321)    │\n  │  → Normalise: lowercase before storing      │\n  │                                             │\n  │  password                                   │\n  │  → Required: cannot be empty                │\n  │  → Min length: 8 characters                 │\n  │  → Complexity: at least one number          │\n  │    (optional but recommended)               │\n  │  → Max length: 72 characters                │\n  │    (bcrypt silently truncates beyond 72)    │\n  │                                             │\n  │  name                                       │\n  │  → Required: cannot be empty                │\n  │  → Min length: 2 characters                 │\n  │  → Max length: 100 characters               │\n  │  → Sanitise: trim whitespace                │\n  └─────────────────────────────────────────────┘\n\n  VALIDATION RESPONSE (all errors at once):\n  HTTP 400 Bad Request\n  {\n    \"error\": \"VALIDATION_ERROR\",\n    \"fields\": {\n      \"email\":    \"Email is required\",\n      \"name\":     \"Name cannot exceed 100 characters\",\n      \"password\": \"Password must be at least 8 characters\"\n    }\n  }\n\n  NOT this (one error at a time — bad UX):\n  HTTP 400 Bad Request\n  {\n    \"error\": \"Email is required\"\n  }\n  ← user fixes email, resubmits\n  HTTP 400 Bad Request\n  {\n    \"error\": \"Password must be at least 8 characters\"\n  }\n  ← user fixes password, resubmits\n  ← infuriating"
+          },
+          {
+            "type": "key-principles",
+            "heading": "Key Principles",
+            "items": [
+              "Never trust input from outside your server — validate everything on the server regardless of what the frontend does",
+              "Validate all fields in one pass and return all errors together — never make the user submit multiple times to discover all mistakes",
+              "Validation belongs in the application layer — not the database layer, not the frontend only",
+              "Normalise input before storing — lowercase emails, trim whitespace from names — so 'John@Example.COM' and 'john@example.com' are treated as the same account",
+              "Set maximum lengths on all string fields — a 500-character name or a 10MB JSON payload can cause real damage if you do not bound your inputs"
+            ]
+          },
+          {
+            "type": "warning",
+            "heading": "The Max Length You Did Not Know You Needed",
+            "content": "Most junior engineers validate minimum length on passwords but forget maximum length. This seems harmless until you learn that bcrypt — the standard password hashing algorithm — silently truncates passwords longer than 72 characters.\n\nThis means a user who sets a 200-character password and then logs in with just the first 72 characters will successfully authenticate — a security vulnerability caused by a missing maximum length validation.\n\nAlways set both minimum and maximum length on every text field. Unbounded input is an attack surface."
+          },
+          {
+            "type": "tradeoffs",
+            "heading": "Trade-offs",
+            "pros": [
+              "Server-side validation catches malicious and malformed input regardless of how the request was made",
+              "Collecting all errors together gives users a better experience — fix everything in one round trip",
+              "Application-layer validation gives you full control over error message language and format"
+            ],
+            "cons": [
+              "Duplicating validation between frontend and server feels redundant but is necessary — accept this cost",
+              "Comprehensive validation rules require maintenance — as requirements change, validation rules must be updated in sync"
+            ]
+          }
+        ],
+        "oneLineSummary": "Frontend validation is a courtesy — server-side validation is the law. Validate all fields, collect all errors, return everything at once."
+      }
+    },
+    {
+      "stepNumber": 3,
+      "interviewerSays": "Validation passes. You need to store the user's password in the database. How do you store it, and why does your choice matter?",
+      "context": "Password storage is one of the most important security decisions a junior engineer makes. Many juniors store passwords as plain text or use MD5/SHA1 hashing without understanding why those are wrong. The correct answer is bcrypt or a modern password hashing algorithm with explanation of why.",
+      "type": "single-choice",
+      "options": [
+        {
+          "id": "A",
+          "text": "I would encrypt the password using AES encryption before storing it — this way it is not plain text in the database, and we can decrypt it later if we need to verify it or show it to the user",
+          "score": 1,
+          "tag": "Fundamentally Wrong",
+          "tagColor": "orange",
+          "interviewerReaction": "Encryption is the wrong tool for passwords. Encryption is reversible — if someone steals your encryption key, every password in your database is instantly compromised. Passwords must be stored using a one-way process that cannot be reversed. You should never be able to recover a user's original password — not even your own system should know what it is. If a user forgets their password, the correct response is a password reset flow, not decryption."
+        },
+        {
+          "id": "B",
+          "text": "I would hash the password with MD5 or SHA-256 before storing — these are standard cryptographic hash functions that are one-way and widely used, so the password cannot be recovered from the hash",
+          "score": 3,
+          "tag": "One-Way but Still Wrong",
+          "tagColor": "orange",
+          "interviewerReaction": "You are right that hashing is one-way — but MD5 and SHA-256 are designed to be extremely fast, which is actually a weakness for password storage. An attacker with a modern GPU can compute billions of MD5 hashes per second. This means they can try every common password, every dictionary word, and every short combination in minutes. Password hashing needs to be deliberately slow. Which algorithm was designed specifically for this purpose?"
+        },
+        {
+          "id": "C",
+          "text": "I would hash the password using bcrypt before storing it — bcrypt is specifically designed for password storage, it is deliberately slow to compute which makes brute force attacks impractical, and it automatically handles salting to prevent rainbow table attacks",
+          "score": 10,
+          "tag": "Excellent",
+          "tagColor": "green",
+          "interviewerReaction": "Perfect answer. Bcrypt is slow by design, salted automatically, and has a configurable work factor so you can make it slower as hardware gets faster. What do you return in the API response after the user is registered — and is there anything you must be careful never to include?"
+        }
+      ],
+      "idealAnswer": {
+        "summary": "Passwords must be hashed with a purpose-built algorithm like bcrypt — never encrypted (reversible), never plain text, and never hashed with a fast algorithm like MD5 or SHA-256. Bcrypt is deliberately slow, automatically salted, and designed specifically for password storage.",
+        "sections": [
+          {
+            "type": "text",
+            "heading": "Three Wrong Ways and One Right Way",
+            "content": "WRONG 1 — Plain text storage:\nThe password is stored exactly as the user typed it. Any database breach immediately exposes every user's password. Unacceptable under any circumstances.\n\nWRONG 2 — Encryption:\nThe password is scrambled but reversible. If the encryption key is stolen, every password is decrypted instantly. Also means your system knows users' passwords — a liability.\n\nWRONG 3 — Fast hashing (MD5, SHA-1, SHA-256):\nOne-way, which is correct, but these algorithms were designed for speed — hashing files and messages quickly. Modern GPUs can compute 10 billion MD5 hashes per second, making brute force attacks trivial.\n\nRIGHT — Slow hashing with bcrypt, scrypt, or Argon2:\nDesigned specifically for passwords. Deliberately slow — takes ~100ms per hash. An attacker can try ~10 passwords per second instead of 10 billion. The same password database that could be cracked in minutes with MD5 would take centuries with bcrypt."
+          },
+          {
+            "type": "architecture-block",
+            "heading": "How Bcrypt Works",
+            "content": "  USER REGISTRATION:\n  ─────────────────────────────────────────\n  Input password:  \"mypassword123\"\n\n  bcrypt generates random salt automatically:\n  salt: \"$2a$12$N9qo8uLOickgx2ZMRZoMyO\"\n\n  bcrypt computes hash (takes ~100ms):\n  hash: \"$2a$12$N9qo8uLOickgx2ZMRZoMyO\n          LkfbbPzENpmmlt4ZpZQHkDTJFBJi2lv6\"\n         ↑         ↑\n         work      salt embedded in hash\n         factor\n\n  Store in database:\n  { passwordHash: \"$2a$12$N9qo8u...\" }\n  ← salt is embedded in the hash string\n  ← no need to store salt separately\n\n  USER LOGIN:\n  ─────────────────────────────────────────\n  Input:    \"mypassword123\"\n  DB hash:  \"$2a$12$N9qo8u...\"\n\n  bcrypt.Verify(inputPassword, storedHash)\n  → Extracts salt from stored hash\n  → Hashes input with same salt\n  → Compares results\n  → Returns: true (match) or false (no match)\n\n  ← You never see or store the original password\n  ← Even if DB is stolen, passwords are safe\n\n  WORK FACTOR:\n  $2a$10$ → 2^10 = 1,024 iterations (fast, older)\n  $2a$12$ → 2^12 = 4,096 iterations (recommended)\n  $2a$14$ → 2^14 = 16,384 iterations (slow, high security)\n  Increase work factor as hardware gets faster."
+          },
+          {
+            "type": "key-principles",
+            "heading": "Key Principles",
+            "items": [
+              "Never store passwords in plain text — not even in a dev or test database",
+              "Never encrypt passwords — encryption is reversible, hashing is not. Passwords must be one-way only",
+              "Never use MD5, SHA-1, or SHA-256 for passwords — they are too fast. Use bcrypt, scrypt, or Argon2",
+              "Bcrypt automatically generates and embeds a unique salt per password — you do not need to manage salts manually",
+              "Work factor of 12 is the current recommended default — increase it as hardware improves over time",
+              "Never implement password hashing yourself — use the battle-tested library for your language"
+            ]
+          },
+          {
+            "type": "warning",
+            "heading": "The Rainbow Table Attack — Why Salting Matters",
+            "content": "A rainbow table is a precomputed list of millions of common passwords and their MD5/SHA-256 hashes. An attacker who steals your database does not need to brute force anything — they just look up each hash in the table.\n\nThe defence is salting: adding a unique random string to each password before hashing. 'password123' + 'randomsalt1' hashes to something completely different than 'password123' + 'randomsalt2'. This makes rainbow tables useless — the attacker cannot precompute hashes because they do not know the salts.\n\nBcrypt handles salting automatically. Every bcrypt hash is unique even for identical passwords. Two users with the password '123456' will have completely different hashes in your database."
+          },
+          {
+            "type": "tradeoffs",
+            "heading": "Trade-offs",
+            "pros": [
+              "Bcrypt is deliberately slow — brute force attacks are computationally impractical even with stolen database",
+              "Automatic salting prevents rainbow table attacks and ensures identical passwords hash differently",
+              "Configurable work factor means you can increase security over time without changing your code"
+            ],
+            "cons": [
+              "100ms per hash means login and registration are inherently slower than plain comparison — acceptable and expected",
+              "High work factors under heavy login load can strain your CPU — monitor and tune appropriately",
+              "Bcrypt truncates at 72 characters — validate maximum password length to avoid silent truncation vulnerability"
+            ]
+          }
+        ],
+        "oneLineSummary": "Passwords must be hashed with bcrypt — not encrypted, not MD5, not SHA-256. Bcrypt is slow by design, salted automatically, and the only acceptable choice for password storage."
+      }
+    },
+    {
+      "stepNumber": 4,
+      "interviewerSays": "The user is registered. What do you include in the API response, and what must you be absolutely careful never to return?",
+      "context": "Response design tests whether the junior engineer thinks about what data the client actually needs versus what data exists in the database. Many juniors return the entire database row, accidentally exposing sensitive fields like password hashes, internal IDs used for security, or fields meant for internal use only.",
+      "type": "single-choice",
+      "options": [
+        {
+          "id": "A",
+          "text": "I would return the full user object from the database — all fields including the password hash, created timestamps, internal flags, and any other columns. The client can then pick what it needs, and returning everything avoids the need to make another API call",
+          "score": 1,
+          "tag": "Data Exposure Risk",
+          "tagColor": "orange",
+          "interviewerReaction": "Returning the full database row is a serious mistake. It exposes the password hash — even though it is hashed and not reversible, it is still sensitive data that attackers can use for offline brute force attacks. It also exposes internal flags, database IDs used in security logic, and fields that have no meaning to the client. API responses should be deliberately designed — return only what the client needs, nothing more."
+        },
+        {
+          "id": "B",
+          "text": "I would return only the fields the client actually needs — id, name, email, and createdAt. I would explicitly exclude the password hash, any internal flags, and any fields not relevant to the frontend. I would define a response model or DTO separately from the database model so sensitive fields can never accidentally leak",
+          "score": 10,
+          "tag": "Excellent",
+          "tagColor": "green",
+          "interviewerReaction": "Exactly right. A dedicated response model means sensitive fields are structurally excluded — not just forgotten. The separation between your database model and your API response model is one of the most important habits to build early. Now — how do you handle errors in your API so that when something goes wrong, the response is useful to the developer but does not expose sensitive system details?"
+        },
+        {
+          "id": "C",
+          "text": "I would return the user object but manually remove the password field before sending — set passwordHash to null or an empty string in the response so the field is present but empty",
+          "score": 3,
+          "tag": "Fragile Approach",
+          "tagColor": "yellow",
+          "interviewerReaction": "Manually removing fields is fragile — it relies on every developer remembering to do it every time. When a new sensitive field is added to the database table next month, it will be returned in the API response until someone notices. The correct approach is a separate response model that only includes fields you deliberately choose to expose — sensitive fields are excluded by default, not removed manually."
+        }
+      ],
+      "idealAnswer": {
+        "summary": "API responses should be deliberately designed using a separate response model — return only what the client needs, never the raw database row. Sensitive fields like password hashes, internal flags, and security-related columns must be structurally excluded, not manually removed.",
+        "sections": [
+          {
+            "type": "text",
+            "heading": "Database Model vs Response Model",
+            "content": "Your database model represents everything stored about a user — all columns, all fields, including sensitive ones that power internal logic. Your API response model represents what you choose to share with the outside world — a deliberate, curated subset.\n\nThese should be two separate classes or objects in your code. Never return your database model directly from an API endpoint. This separation ensures:\n\n1. Sensitive fields cannot accidentally leak — they are not in the response model\n2. Database schema changes do not automatically become API changes\n3. You can evolve your storage without breaking API consumers\n4. New developers cannot accidentally expose a sensitive field they did not know existed"
+          },
+          {
+            "type": "architecture-block",
+            "heading": "Database Model vs Response Model",
+            "content": "  DATABASE MODEL (everything stored)\n  ─────────────────────────────────────────\n  class UserEntity {\n    id:                  uuid\n    email:               string\n    passwordHash:        string   ← NEVER expose\n    name:                string\n    createdAt:           datetime\n    updatedAt:           datetime\n    isEmailVerified:     bool     ← internal state\n    failedLoginAttempts: int      ← security logic\n    lockedUntil:         datetime ← security logic\n    internalNotes:       string   ← admin only\n    deletedAt:           datetime ← soft delete flag\n  }\n\n  API RESPONSE MODEL (what client receives)\n  ─────────────────────────────────────────\n  class UserRegistrationResponse {\n    id:        uuid     ← client needs this\n    name:      string   ← client needs this\n    email:     string   ← client needs this\n    createdAt: datetime ← useful for display\n  }\n\n  ACTUAL RESPONSE:\n  HTTP 201 Created\n  Location: /api/users/uuid-1234\n  {\n    \"id\":        \"uuid-1234\",\n    \"name\":      \"John Smith\",\n    \"email\":     \"john@example.com\",\n    \"createdAt\": \"2024-03-10T14:30:00Z\"\n  }\n\n  passwordHash: not in response model → cannot leak\n  failedLoginAttempts: not in model → cannot leak\n  lockedUntil: not in model → cannot leak"
+          },
+          {
+            "type": "key-principles",
+            "heading": "Key Principles",
+            "items": [
+              "Never return the database entity directly from an API endpoint — always map to a dedicated response model",
+              "Password hash must never appear in any API response under any circumstances — not masked, not empty, not present at all",
+              "Security-related fields (failed login attempts, lock status, internal flags) are internal state — clients have no business seeing them",
+              "The response model is a contract — once published, clients depend on it. Add fields deliberately, remove them carefully with versioning",
+              "When in doubt about whether to include a field, leave it out — it is easier to add a field later than to remove one that clients depend on"
+            ]
+          },
+          {
+            "type": "warning",
+            "heading": "The Accidental Data Exposure Pattern",
+            "content": "The most common way sensitive data leaks in junior-built APIs is automatic serialisation. Many frameworks will automatically serialise every property of an object to JSON if you return it from a controller method.\n\nYou add a new column to the users table — say, stripeCustomerId — and suddenly every API response that returns a user object starts including the Stripe customer ID. Nobody noticed because the code did not change — the framework just serialised the new property automatically.\n\nThe fix is structural: your response model only includes what you explicitly add to it. New database columns are invisible to the API until you deliberately add them to the response model."
+          },
+          {
+            "type": "tradeoffs",
+            "heading": "Trade-offs",
+            "pros": [
+              "Structural exclusion of sensitive fields — cannot leak what is not in the model",
+              "Database and API evolve independently — storage changes do not break API consumers",
+              "Clear, minimal responses reduce payload size and make API documentation simpler"
+            ],
+            "cons": [
+              "Mapping between database models and response models adds code — worth the safety it provides",
+              "Multiple response models for the same entity (registration response, profile response, admin response) require maintenance discipline"
+            ]
+          }
+        ],
+        "oneLineSummary": "Never return the database row directly — design a separate response model that includes only what the client needs, making sensitive field exposure structurally impossible."
+      }
+    },
+    {
+      "stepNumber": 5,
+      "interviewerSays": "Your API is working correctly. Now think about what happens when things go wrong — an unhandled exception occurs during registration. What should your error response look like, and what information should you never include in it?",
+      "context": "Error response design tests whether the junior engineer understands the difference between information useful to a developer and information useful to an attacker. Stack traces, database error messages, and internal paths in error responses are a gift to anyone probing your API for vulnerabilities.",
+      "type": "single-choice",
+      "options": [
+        {
+          "id": "A",
+          "text": "I would return the full exception details in the response — the exception message, the stack trace, and the inner exception. This helps developers debug the problem quickly when something goes wrong",
+          "score": 1,
+          "tag": "Security Vulnerability",
+          "tagColor": "orange",
+          "interviewerReaction": "Returning stack traces and exception messages to clients is a serious security vulnerability. A stack trace reveals your file structure, class names, library versions, framework internals, and sometimes even configuration values. This is exactly the information an attacker needs to craft a targeted exploit. Exception details belong in your server logs — never in the API response."
+        },
+        {
+          "id": "B",
+          "text": "I would return a generic error message to the client — something like 'Something went wrong, please try again' — and log the full exception details including stack trace and context on the server. The client gets a safe message, the development team gets everything they need to debug",
+          "score": 10,
+          "tag": "Excellent",
+          "tagColor": "green",
+          "interviewerReaction": "Exactly the right separation. The client gets a safe, human-readable message. The server logs get everything needed for debugging. This keeps internal details away from attackers while still giving your team full visibility. Include a correlation ID in both the response and the log so you can match a client error report to the exact log entry. One final question — what would you add to the API to protect against someone writing a script to register thousands of fake accounts?"
+        },
+        {
+          "id": "C",
+          "text": "I would return a 500 status code with no body — just the status code tells the client something went wrong, and returning nothing prevents any information from leaking",
+          "score": 4,
+          "tag": "Too Minimal",
+          "tagColor": "yellow",
+          "interviewerReaction": "No response body makes your API harder to consume — the client has no idea what happened or whether to retry. A safe error response can include a generic message and a correlation ID without exposing any sensitive details. The goal is not to return nothing — it is to return something safe and useful without revealing internals."
+        }
+      ],
+      "idealAnswer": {
+        "summary": "Error responses have two audiences: the client (who needs a safe, human-readable message) and your development team (who needs full diagnostic detail). Server logs get the full exception. The API response gets a generic message and a correlation ID. Never expose stack traces, exception messages, or internal paths in API responses.",
+        "sections": [
+          {
+            "type": "text",
+            "heading": "Two Audiences, Two Different Information Needs",
+            "content": "When an unhandled exception occurs, two things need to happen simultaneously:\n\n1. The client must receive a response that is safe, human-readable, and actionable — telling them something went wrong and what to do next (retry, contact support, etc.) without revealing anything about your internals.\n\n2. Your server logs must capture everything — the full exception, the stack trace, the request details, the user ID, the timestamp — so your development team can diagnose and fix the problem.\n\nThese are completely different outputs for completely different audiences. Conflating them by sending exception details to the client is where the vulnerability comes from."
+          },
+          {
+            "type": "architecture-block",
+            "heading": "Error Response Design",
+            "content": "  UNHANDLED EXCEPTION OCCURS\n           │\n           ▼\n  Global Exception Handler (middleware)\n           │\n     ┌─────┴──────────────────────────┐\n     │                                │\n     ▼                                ▼\n  LOG (server side)            RESPONSE (client side)\n  ─────────────────            ──────────────────────\n  correlationId: abc-123       HTTP 500\n  timestamp: 2024-03-10...     {\n  userId: user-99                \"error\": \"INTERNAL_ERROR\",\n  endpoint: POST /api/users      \"message\": \"Something went\n  requestBody: {...}                         wrong. Please\n  exception: NullReference...               try again.\",\n  stackTrace:                    \"correlationId\": \"abc-123\",\n    at UserService.cs:47         \"support\": \"Quote this ID\n    at Controller.cs:23                     when contacting\n    ...                                     support\"\n  innerException: ...          }\n\n  WHAT THE CLIENT SEES:        WHAT YOUR LOGS HAVE:\n  Safe generic message         Everything needed to debug\n  Correlation ID only          Full exception details\n  No internal details          Request context\n                               User context\n\n  Developer checks logs:       Attacker checks response:\n  → Finds full exception       → Finds nothing useful\n  → Fixes the bug              → Cannot exploit"
+          },
+          {
+            "type": "key-principles",
+            "heading": "Key Principles",
+            "items": [
+              "Implement a global exception handler that catches all unhandled exceptions — never let raw exceptions reach the client",
+              "Generate a unique correlation ID for every request — include it in both the error response and the log entry so errors can be traced",
+              "Log the full exception with context on the server — request details, user ID, timestamp, stack trace",
+              "Return only a generic message to the client — never exception type, message, stack trace, file paths, or line numbers",
+              "Different error types get different messages: validation errors (400) should explain what to fix, server errors (500) should say try again or contact support"
+            ]
+          },
+          {
+            "type": "warning",
+            "heading": "What a Stack Trace Tells an Attacker",
+            "content": "A stack trace in an API response reveals:\n→ Your framework and version (e.g. ASP.NET Core 8.0.1)\n→ Your file structure (e.g. /src/Services/UserService.cs)\n→ Your class and method names (e.g. UserService.RegisterAsync)\n→ Library versions you depend on\n→ Sometimes database connection strings if they appear in inner exceptions\n\nWith your framework version, an attacker checks the CVE database for known vulnerabilities in that exact version. With your file structure and class names, they craft more targeted injection attempts. With your library versions, they look for exploits in your dependencies.\n\nA stack trace is a free security audit report handed directly to the attacker. Never return one."
+          },
+          {
+            "type": "tradeoffs",
+            "heading": "Trade-offs",
+            "pros": [
+              "Correlation ID connects client error reports to server logs — support tickets become debuggable in seconds",
+              "Generic client messages give attackers nothing useful while still being actionable for legitimate users",
+              "Centralised global exception handler means consistent error responses across every endpoint"
+            ],
+            "cons": [
+              "Generic error messages can frustrate developers consuming your API during integration — mitigate with good documentation and clear 4xx messages for expected error cases",
+              "Correlation ID logging requires structured logging infrastructure — worth setting up from day one"
+            ]
+          }
+        ],
+        "oneLineSummary": "Server logs get the full exception. The client gets a generic message and a correlation ID. Never let internal details cross that boundary."
+      }
+    },
+    {
+      "stepNumber": 6,
+      "interviewerSays": "Last question. Your registration API is live. A malicious user writes a script that registers 10,000 fake accounts in an hour — flooding your database, consuming your resources, and bypassing your email verification system. What would you have built into the API from the beginning to prevent this?",
+      "context": "Rate limiting is a fundamental API protection that many juniors skip because it is not core to the happy path. This tests whether the engineer thinks about abuse scenarios during design, not just after an incident occurs.",
+      "type": "single-choice",
+      "options": [
+        {
+          "id": "A",
+          "text": "I would add CAPTCHA to the registration form on the frontend — this prevents bots from submitting the form automatically and is the standard way to protect registration from abuse",
+          "score": 4,
+          "tag": "Incomplete",
+          "tagColor": "yellow",
+          "interviewerReaction": "CAPTCHA on the frontend helps with basic bots but can be bypassed by scripts that call your API directly — they skip the frontend entirely. CAPTCHA is a UX layer, not an API protection layer. What do you add at the API level itself to limit how many registration requests any single source can make in a given time window?"
+        },
+        {
+          "id": "B",
+          "text": "I would implement rate limiting at the API level — limit registration requests to a small number per IP address per time window, for example 5 registrations per IP per hour. Requests beyond this limit receive a 429 Too Many Requests response. I would also add email verification so registered accounts are only activated after the user confirms their email address",
+          "score": 10,
+          "tag": "Excellent",
+          "tagColor": "green",
+          "interviewerReaction": "Perfect combination. Rate limiting at the API stops the flood regardless of where the request comes from. Email verification means fake accounts cannot be activated even if they get past rate limiting. And 429 Too Many Requests is exactly the right status code — it tells legitimate clients to slow down rather than retrying immediately. This is how you think about abuse prevention from the start."
+        },
+        {
+          "id": "C",
+          "text": "I would monitor the registrations dashboard and manually block IP addresses when I notice suspicious activity — automated attacks are usually obvious and can be stopped reactively once detected",
+          "score": 1,
+          "tag": "Reactive Not Protective",
+          "tagColor": "orange",
+          "interviewerReaction": "Manual monitoring and reactive blocking means the damage is already done by the time you notice — 10,000 fake accounts are already in your database. At scale you cannot monitor every endpoint manually. Protection must be built in from the start and enforced automatically. What automated mechanism would enforce a limit without requiring you to watch a dashboard?"
+        }
+      ],
+      "idealAnswer": {
+        "summary": "Rate limiting at the API level is the fundamental protection against automated abuse — limit requests per IP per time window, return 429 Too Many Requests when exceeded, and combine with email verification so even accounts that slip through cannot be activated. Build protection in from the start, not reactively after an incident.",
+        "sections": [
+          {
+            "type": "text",
+            "heading": "Why Registration Specifically Needs Rate Limiting",
+            "content": "Registration endpoints are high-value targets for abuse because:\n\n1. They are publicly accessible — no authentication required\n2. They write to your database — each fake registration consumes storage and database writes\n3. They can be used for enumeration — does this email already exist? An attacker can discover which emails are registered\n4. They consume downstream resources — email verification sends, welcome notifications, onboarding jobs\n5. They can be used to facilitate spam — 10,000 registered accounts can send 10,000 password reset emails to your mail server\n\nA registration endpoint with no rate limiting is an open resource consumption attack vector. Every public endpoint that creates resources or sends external messages needs rate limiting."
+          },
+          {
+            "type": "architecture-block",
+            "heading": "Rate Limiting + Email Verification Design",
+            "content": "  RATE LIMITING LAYER:\n  ─────────────────────────────────────────\n  Rules:\n  → Max 5 registrations per IP per hour\n  → Max 3 registrations per email domain\n    per hour (prevents burst from one domain)\n\n  Implementation options:\n  → Middleware using in-memory counter (single server)\n  → Redis counter with TTL (distributed, recommended)\n\n  Redis approach:\n  Key:   rate:register:ip:192.168.1.1\n  Value: 3  (current count)\n  TTL:   3600 seconds (1 hour window)\n\n  INCR rate:register:ip:192.168.1.1\n  → If result > 5:\n    Return HTTP 429 Too Many Requests\n    Retry-After: 3600 (seconds until reset)\n  → If result <= 5:\n    Proceed with registration\n\n  RESPONSE WHEN RATE LIMITED:\n  HTTP 429 Too Many Requests\n  Retry-After: 3247\n  {\n    \"error\":   \"RATE_LIMIT_EXCEEDED\",\n    \"message\": \"Too many registration attempts.\n                Please try again in 54 minutes.\"\n  }\n\n  EMAIL VERIFICATION LAYER:\n  ─────────────────────────────────────────\n  Registration creates account:\n  status: PENDING_VERIFICATION\n\n  Send verification email with:\n  token: random 32-byte URL-safe string\n  expiry: 24 hours\n  link: /verify-email?token=abc123...\n\n  GET /verify-email?token=abc123\n  → Validate token exists and not expired\n  → Update account: status: ACTIVE\n  → Token deleted (single use)\n\n  PENDING_VERIFICATION accounts:\n  → Cannot log in\n  → Cannot use any features\n  → Auto-deleted after 48 hours if unverified\n  → Fake accounts self-clean from your database"
+          },
+          {
+            "type": "key-principles",
+            "heading": "Key Principles",
+            "items": [
+              "Rate limit by IP address at minimum — for higher security, also rate limit by email domain to prevent burst registrations from the same domain",
+              "Return 429 Too Many Requests with a Retry-After header — this tells legitimate clients when they can try again, not just that they failed",
+              "Use Redis for rate limit counters in any multi-server deployment — in-memory counters are per-server and useless when you have multiple instances",
+              "Email verification converts registration from an instant activation to a confirmed intent — fake email addresses cannot be verified",
+              "Auto-delete unverified accounts after 48 hours — keeps your database clean without manual intervention",
+              "Rate limiting and CAPTCHA are complementary — CAPTCHA helps at the UI layer, rate limiting protects the API layer. Use both."
+            ]
+          },
+          {
+            "type": "warning",
+            "heading": "The Email Enumeration Vulnerability",
+            "content": "A subtle security issue in registration APIs: if your API returns different responses for 'email already registered' vs 'registration successful', an attacker can use your registration endpoint to discover which email addresses are registered on your platform.\n\nThey submit 10,000 emails. For each one that returns 409 Conflict they know the account exists. They now have a list of your users' email addresses — useful for targeted phishing.\n\nThe fix for high-security systems: always return the same response regardless of whether the email exists. Send a 'welcome or email already registered' email to the address and respond with the same 201 to the API in both cases. The user finds out via email, not via the API response."
+          },
+          {
+            "type": "tradeoffs",
+            "heading": "Trade-offs",
+            "pros": [
+              "Rate limiting stops automated abuse before it causes damage — not reactively after",
+              "Email verification eliminates fake accounts automatically — they cannot activate without a real inbox",
+              "429 with Retry-After is friendly to legitimate clients — they know exactly when to retry",
+              "Redis-based counters work correctly across multiple API server instances"
+            ],
+            "cons": [
+              "IP-based rate limiting can affect legitimate users behind shared IPs — corporate offices, university networks, or mobile carriers may share one IP across thousands of users. Tune limits carefully or use user-level limiting post-authentication",
+              "Email verification adds friction to registration — measure drop-off rates and tune the verification expiry window accordingly"
+            ]
+          }
+        ],
+        "oneLineSummary": "Rate limiting at the API level plus email verification is the combination that stops automated abuse — rate limiting caps the flood, email verification ensures fake accounts cannot activate even if they get through."
+      }
+    }
+  ],
+
+  "scoreCard": {
+    "maxScore": 60,
+    "bands": [
+      {
+        "min": 54,
+        "max": 60,
+        "label": "Strong Junior Engineer",
+        "color": "green",
+        "message": "You demonstrated security awareness and deliberate API design thinking across all six decisions. These fundamentals will serve you well throughout your career — most senior engineers wish they had learned them this early."
+      },
+      {
+        "min": 36,
+        "max": 53,
+        "label": "Good Foundation, Key Gaps",
+        "color": "yellow",
+        "message": "Solid instincts in some areas with gaps in others. Review the areas where you lost points — particularly password storage, response design, and error handling. These are the decisions that cause real security incidents in production."
+      },
+      {
+        "min": 0,
+        "max": 35,
+        "label": "Fundamentals to Strengthen",
+        "color": "red",
+        "message": "Focus on the security fundamentals covered in this scenario — status codes, server-side validation, bcrypt, response models, error handling, and rate limiting. Build a small registration API from scratch implementing each of these correctly. Doing beats reading."
+      }
+    ]
+  }
+}
