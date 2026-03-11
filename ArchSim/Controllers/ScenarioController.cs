@@ -1,6 +1,8 @@
+using ArchSim.Data;
 using ArchSim.Models;
 using ArchSim.Services;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 using System.Text.Json;
 
 namespace ArchSim.Controllers;
@@ -9,11 +11,13 @@ public class ScenarioController : Controller
 {
     private readonly ScenarioLoader _loader;
     private readonly ScoreCalculator _calculator;
+    private readonly AppDbContext _db;
 
-    public ScenarioController(ScenarioLoader loader, ScoreCalculator calculator)
+    public ScenarioController(ScenarioLoader loader, ScoreCalculator calculator, AppDbContext db)
     {
         _loader = loader;
         _calculator = calculator;
+        _db = db;
     }
 
     // GET /scenario/{id}
@@ -22,7 +26,6 @@ public class ScenarioController : Controller
         var scenario = _loader.GetById(id);
         if (scenario == null) return NotFound();
 
-        // Initialize empty session state
         var result = new SessionResult { ScenarioId = id, Answers = new List<SessionAnswer>() };
         HttpContext.Session.SetString($"answers_{id}", JsonSerializer.Serialize(result.Answers));
 
@@ -57,11 +60,9 @@ public class ScenarioController : Controller
         var option = step.Options.FirstOrDefault(o => o.Id == selectedOptionId);
         if (option == null) return BadRequest();
 
-        // Append to session
         var answersJson = HttpContext.Session.GetString($"answers_{id}") ?? "[]";
         var answers = JsonSerializer.Deserialize<List<SessionAnswer>>(answersJson) ?? new();
 
-        // Replace if already answered this step
         answers.RemoveAll(a => a.StepNumber == stepNumber);
         answers.Add(new SessionAnswer
         {
@@ -89,7 +90,7 @@ public class ScenarioController : Controller
     }
 
     // GET /scenario/{id}/score
-    public IActionResult Score(string id)
+    public async Task<IActionResult> Score(string id)
     {
         var scenario = _loader.GetById(id);
         if (scenario == null) return NotFound();
@@ -98,6 +99,45 @@ public class ScenarioController : Controller
         var answers = JsonSerializer.Deserialize<List<SessionAnswer>>(answersJson) ?? new();
 
         var vm = _calculator.Calculate(scenario, answers);
+
+        // Persist score for logged-in users
+        if (User.Identity?.IsAuthenticated == true && answers.Count > 0)
+        {
+            var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (int.TryParse(userIdClaim, out var userId))
+            {
+                var existing = _db.ScoreRecords
+                    .FirstOrDefault(r => r.UserId == userId && r.ScenarioId == id);
+
+                if (existing != null)
+                {
+                    existing.TotalScore = vm.TotalScore;
+                    existing.MaxScore = vm.MaxScore;
+                    existing.BandLabel = vm.Band?.Label ?? "";
+                    existing.BandColor = vm.Band?.Color ?? "";
+                    existing.CompletedAt = DateTime.UtcNow;
+                }
+                else
+                {
+                    _db.ScoreRecords.Add(new UserScoreRecord
+                    {
+                        UserId = userId,
+                        ScenarioId = id,
+                        ScenarioTitle = scenario.Title,
+                        Category = scenario.Category ?? "",
+                        Difficulty = scenario.Difficulty ?? "",
+                        TotalScore = vm.TotalScore,
+                        MaxScore = vm.MaxScore,
+                        BandLabel = vm.Band?.Label ?? "",
+                        BandColor = vm.Band?.Color ?? "",
+                        CompletedAt = DateTime.UtcNow
+                    });
+                }
+
+                await _db.SaveChangesAsync();
+            }
+        }
+
         return View(vm);
     }
 }

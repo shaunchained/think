@@ -7,7 +7,6 @@
         window.dataLayer = window.dataLayer || [];
         function gtag() { dataLayer.push(arguments); }
         gtag('js', new Date());
-
         gtag('config', 'G-00FS1FXHP5');
     </script>
     <meta charset="utf-8" />
@@ -18,7 +17,6 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="~/archsim/css/site.css" asp-append-version="true" />
     <script>
-        // Apply saved theme before first paint to prevent flash
         (function () {
             var t = localStorage.getItem('think-theme') || 'dark';
             document.documentElement.setAttribute('data-theme', t);
@@ -29,9 +27,37 @@
     <nav class="site-nav">
         <a href="/" class="site-brand">Think</a>
         <span class="site-nav-sub">Scenario Simulator for Engineers</span>
-        <div class="theme-switcher" role="group" aria-label="Theme">
-            <button class="theme-opt theme-opt-dark" onclick="setTheme('dark')">☾ Dark</button>
-            <button class="theme-opt theme-opt-light" onclick="setTheme('light')">☀ Light</button>
+        <div class="nav-right">
+            <div class="theme-switcher" role="group" aria-label="Theme">
+                <button class="theme-opt theme-opt-dark" onclick="setTheme('dark')">☾ Dark</button>
+                <button class="theme-opt theme-opt-light" onclick="setTheme('light')">☀ Light</button>
+            </div>
+            @if (User.Identity?.IsAuthenticated == true)
+            {
+                var pictureClaim = User.FindFirst("picture")?.Value ?? "";
+                var nameClaim = User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? "User";
+                <div class="nav-user">
+                    <a href="/dashboard" class="nav-link">Dashboard</a>
+                    <a href="/account/profile" class="nav-avatar-link">
+                        @if (!string.IsNullOrEmpty(pictureClaim))
+                        {
+                            <img src="@pictureClaim" alt="@nameClaim" class="nav-avatar" referrerpolicy="no-referrer" />
+                        }
+                        else
+                        {
+                            <span class="nav-avatar nav-avatar-initials">@(nameClaim.Length > 0 ? nameClaim[0].ToString().ToUpper() : "U")</span>
+                        }
+                    </a>
+                    <form asp-controller="Account" asp-action="Logout" method="post" class="nav-logout-form">
+                        @Html.AntiForgeryToken()
+                        <button type="submit" class="nav-logout-btn">Sign out</button>
+                    </form>
+                </div>
+            }
+            else
+            {
+                <a href="/account/login" class="nav-login-btn">Sign in</a>
+            }
         </div>
     </nav>
     <main>

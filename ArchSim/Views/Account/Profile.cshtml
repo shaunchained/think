@@ -1,0 +1,29 @@
+@model ArchSim.Models.ApplicationUser
+@{
+    ViewData["Title"] = "Profile — Think";
+}
+<div class="profile-page">
+    <div class="profile-header">
+        @if (!string.IsNullOrEmpty(Model.PictureUrl))
+        {
+            <img src="@Model.PictureUrl" alt="@Model.Name" class="profile-avatar" referrerpolicy="no-referrer" />
+        }
+        else
+        {
+            <div class="profile-avatar profile-avatar-initials">@(Model.Name.Length > 0 ? Model.Name[0].ToString().ToUpper() : "U")</div>
+        }
+        <div class="profile-info">
+            <h1 class="profile-name">@Model.Name</h1>
+            <p class="profile-email">@Model.Email</p>
+            <p class="profile-joined">Member since @Model.CreatedAt.ToString("MMMM yyyy")</p>
+        </div>
+    </div>
+
+    <div class="profile-actions">
+        <a href="/dashboard" class="btn-primary">View Dashboard</a>
+        <form asp-controller="Account" asp-action="Logout" method="post" style="display:inline">
+            @Html.AntiForgeryToken()
+            <button type="submit" class="btn-secondary">Sign Out</button>
+        </form>
+    </div>
+</div>

@@ -1,0 +1,96 @@
+@model ArchSim.Models.DashboardViewModel
+@{
+    ViewData["Title"] = "Dashboard — Think";
+}
+<div class="dashboard-page">
+    <div class="dashboard-header">
+        <div class="dashboard-welcome">
+            @if (!string.IsNullOrEmpty(Model.User.PictureUrl))
+            {
+                <img src="@Model.User.PictureUrl" alt="@Model.User.Name" class="dash-avatar" referrerpolicy="no-referrer" />
+            }
+            <div>
+                <h1 class="dash-title">Welcome back, @Model.User.Name.Split(' ')[0]</h1>
+                <p class="dash-sub">Here's your progress so far</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="dash-stats">
+        <div class="dash-stat-card">
+            <div class="dash-stat-value">@Model.CompletedScenarios</div>
+            <div class="dash-stat-label">Scenarios Completed</div>
+        </div>
+        <div class="dash-stat-card">
+            <div class="dash-stat-value">@Model.TotalScenarios</div>
+            <div class="dash-stat-label">Total Scenarios</div>
+        </div>
+        <div class="dash-stat-card">
+            <div class="dash-stat-value">@Model.AveragePercentage<span class="dash-stat-unit">%</span></div>
+            <div class="dash-stat-label">Average Score</div>
+        </div>
+        @if (Model.BestRecord != null)
+        {
+            var bestPct = Model.BestRecord.MaxScore > 0 ? (int)Math.Round(Model.BestRecord.TotalScore * 100.0 / Model.BestRecord.MaxScore) : 0;
+            <div class="dash-stat-card">
+                <div class="dash-stat-value">@bestPct<span class="dash-stat-unit">%</span></div>
+                <div class="dash-stat-label">Best Score</div>
+            </div>
+        }
+    </div>
+
+    <div class="dash-section">
+        <div class="dash-section-header">
+            <h2 class="dash-section-title">Your Attempts</h2>
+            <a href="/" class="btn-primary btn-sm">Browse Scenarios</a>
+        </div>
+
+        @if (!Model.ScoreRecords.Any())
+        {
+            <div class="dash-empty">
+                <p>You haven't completed any scenarios yet.</p>
+                <a href="/" class="btn-primary">Start Your First Scenario</a>
+            </div>
+        }
+        else
+        {
+            <div class="dash-table-wrapper">
+                <table class="dash-table">
+                    <thead>
+                        <tr>
+                            <th>Scenario</th>
+                            <th>Category</th>
+                            <th>Difficulty</th>
+                            <th>Score</th>
+                            <th>Result</th>
+                            <th>Completed</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var record in Model.ScoreRecords)
+                        {
+                            var pct = record.MaxScore > 0 ? (int)Math.Round(record.TotalScore * 100.0 / record.MaxScore) : 0;
+                            <tr>
+                                <td class="dash-scenario-name">@record.ScenarioTitle</td>
+                                <td><span class="badge badge-cat">@record.Category</span></td>
+                                <td><span class="badge badge-diff badge-diff-@record.Difficulty.ToLower()">@record.Difficulty</span></td>
+                                <td>
+                                    <div class="dash-score-bar">
+                                        <div class="dash-score-fill" style="width:@pct%"></div>
+                                    </div>
+                                    <span class="dash-score-pct">@pct%</span>
+                                </td>
+                                <td><span class="band-badge" style="color:@record.BandColor">@record.BandLabel</span></td>
+                                <td class="dash-date">@record.CompletedAt.ToString("MMM d, yyyy")</td>
+                                <td>
+                                    <a href="/scenario/@record.ScenarioId" class="dash-retry-btn">Retry →</a>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>
