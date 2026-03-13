@@ -14,6 +14,5 @@ public class Scenario
     public Interviewer Interviewer { get; set; } = new();
     public List<Step> Steps { get; set; } = new();
     public ScoreCard ScoreCard { get; set; } = new();
-    public PostRead? PostRead { get; set; }
     public List<ResourceGroup> Resources { get; set; } = new();
 }

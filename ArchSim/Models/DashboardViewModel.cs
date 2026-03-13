@@ -8,4 +8,6 @@ public class DashboardViewModel
     public int CompletedScenarios { get; set; }
     public int AveragePercentage { get; set; }
     public UserScoreRecord? BestRecord { get; set; }
+    public List<WeakPointEntry> WeakAreas { get; set; } = new();
+    public List<ScenarioSummary> RecommendedScenarios { get; set; } = new();
 }

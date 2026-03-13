@@ -109,6 +109,12 @@ public class ScenarioController : Controller
             var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
             if (int.TryParse(userIdClaim, out var userId))
             {
+                var weakPoints = vm.StepReviews
+                    .Where(r => r.TagColor != "green")
+                    .Select(r => new WeakPointEntry { Topic = r.Topic, Tag = r.Tag, TagColor = r.TagColor })
+                    .ToList();
+                var weakPointsJson = JsonSerializer.Serialize(weakPoints);
+
                 var existing = _db.ScoreRecords
                     .FirstOrDefault(r => r.UserId == userId && r.ScenarioId == id);
 
@@ -119,6 +125,7 @@ public class ScenarioController : Controller
                     existing.BandLabel = vm.Band?.Label ?? "";
                     existing.BandColor = vm.Band?.Color ?? "";
                     existing.CompletedAt = DateTime.UtcNow;
+                    existing.WeakPointsJson = weakPointsJson;
                 }
                 else
                 {
@@ -133,7 +140,8 @@ public class ScenarioController : Controller
                         MaxScore = vm.MaxScore,
                         BandLabel = vm.Band?.Label ?? "",
                         BandColor = vm.Band?.Color ?? "",
-                        CompletedAt = DateTime.UtcNow
+                        CompletedAt = DateTime.UtcNow,
+                        WeakPointsJson = weakPointsJson
                     });
                 }
 

@@ -25,6 +25,7 @@
   "steps": [
     {
       "stepNumber": 1,
+      "topic": "Multi-Tenancy Models & GDPR Data Isolation",
       "interviewerSays": "Müller Industrietechnik's legal team asks directly: how is their data isolated from other tenants on EduCore? They are a German company. GDPR compliance is non-negotiable for them.",
       "context": "Opening question. They want to see if you understand multi-tenancy models at depth — and whether you recognise that GDPR data residency changes the answer beyond simple logical isolation.",
       "type": "single-choice",
@@ -104,6 +105,7 @@
     },
     {
       "stepNumber": 2,
+      "topic": "Tenant Routing & Header Injection Prevention",
       "interviewerSays": "Good. EduCore uses subdomains — muller.educore.io, acme.educore.io. Walk me through exactly how the platform identifies which tenant a request belongs to and routes it to the correct regional pod. What are the failure modes and security risks in this flow?",
       "context": "Tenant identification and routing is where many systems have subtle security bugs. The question probes whether the engineer thinks about spoofing, header injection, registry availability, and multi-region routing — not just the happy path.",
       "type": "single-choice",
@@ -182,6 +184,7 @@
     },
     {
       "stepNumber": 3,
+      "topic": "Tenant Suspension & Cache Invalidation",
       "interviewerSays": "Acme Corp violates their contract. You need to suspend their tenant immediately. Their data is cached across Redis. Walk me through the exact suspension workflow — what you do, in what order, and why the sequence matters.",
       "context": "This tests operational thinking and cache invalidation design. Suspension must be instant, complete, and verifiable. Many engineers only think about the database — the cache is where suspended tenants continue to receive service for the full TTL of every cached key.",
       "type": "single-choice",
@@ -261,6 +264,7 @@
     },
     {
       "stepNumber": 4,
+      "topic": "Infrastructure as Code & Automated Provisioning",
       "interviewerSays": "Müller signs the contract. Their Geo-Pod in Germany North needs to be provisioned — AKS namespace, dedicated SQL database, Redis cache, Blob Storage container, DNS subdomain, TLS certificate, tenant registry entry. Your current process is manual — a senior engineer spends two days clicking through the Azure portal. What is wrong with that, and how do you redesign the provisioning process?",
       "context": "This tests operational maturity and Infrastructure-as-Code thinking at the 5-10 year level. Manual provisioning does not scale, is error-prone, and creates configuration drift between tenants. The right answer introduces IaC, automated pipelines, and idempotent provisioning — with specific attention to what can go wrong mid-provisioning.",
       "type": "single-choice",
@@ -340,6 +344,7 @@
     },
     {
       "stepNumber": 5,
+      "topic": "Cross-Tenant Data Leakage Prevention",
       "interviewerSays": "Your security team has received a report. In EduCore's shared Redis cache — used by non-Geo-Pod tenants on the Pool Model — a cache key for one tenant was accidentally returned to a different tenant's request. The bug has been fixed in code. But you need to explain why it happened, how you would detect this class of problem automatically going forward, and what architectural changes prevent it from recurring.",
       "context": "This is a cross-tenant data leakage scenario — the most serious class of bug in a multi-tenant system. It tests whether the engineer thinks in layers: the code bug is the immediate cause, but the architecture allowed it to happen. The right answer addresses detection, incident response, and structural prevention — not just the code fix.",
       "type": "single-choice",

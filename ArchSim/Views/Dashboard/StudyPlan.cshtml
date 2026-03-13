@@ -1,0 +1,146 @@
+@model List<ArchSim.Models.WeakPointEntry>
+@{
+    ViewData["Title"] = "Study Plan — Think";
+    var topicsJson = System.Text.Json.JsonSerializer.Serialize(
+        Model.Select(w => new { topic = w.Topic, tag = w.Tag, tagColor = w.TagColor }));
+}
+
+<div class="study-page">
+
+    <div class="study-header">
+        <a href="/dashboard" class="study-back">← Dashboard</a>
+        <h1 class="study-title">Study Plan</h1>
+        <p class="study-subtitle">Work through your weak areas — one concept at a time</p>
+    </div>
+
+    <div class="study-progress-wrap">
+        <div class="study-progress-track">
+            <div class="study-progress-fill" id="studyProgressFill"></div>
+        </div>
+        <span class="study-progress-label" id="studyProgressLabel"></span>
+    </div>
+
+    <div class="study-card" id="studyCard">
+        <div class="study-topic-header">
+            <h2 class="study-topic-title" id="studyTopicTitle"></h2>
+            <span class="result-tag" id="studyTopicTag"></span>
+        </div>
+
+        <div class="study-content-area">
+            <div class="study-loading" id="studyLoading">
+                <div class="study-spinner"></div>
+                <span>Generating content…</span>
+            </div>
+
+            <div id="studyContent" style="display:none">
+                <div class="study-section">
+                    <div class="study-section-label">What Is It?</div>
+                    <p class="study-section-text" id="contentWhat"></p>
+                </div>
+                <div class="study-section">
+                    <div class="study-section-label">Why It Matters</div>
+                    <p class="study-section-text" id="contentWhy"></p>
+                </div>
+                <div class="study-section">
+                    <div class="study-section-label">Key Points</div>
+                    <ul class="study-key-points" id="contentKeyPoints"></ul>
+                </div>
+                <div class="study-section">
+                    <div class="study-section-label">Real-World Example</div>
+                    <p class="study-section-text" id="contentExample"></p>
+                </div>
+            </div>
+
+            <div class="study-error" id="studyError" style="display:none"></div>
+        </div>
+    </div>
+
+    <div class="study-nav">
+        <button class="study-nav-btn study-nav-prev" id="btnPrev" onclick="navigate(-1)">← Previous</button>
+        <button class="study-nav-btn study-nav-next" id="btnNext" onclick="navigate(1)">Next →</button>
+    </div>
+
+</div>
+
+<script>
+    const topics = @Html.Raw(topicsJson);
+    let current = 0;
+    const cache = {};
+
+    function updateUI() {
+        const total = topics.length;
+        const t = topics[current];
+
+        document.getElementById('studyProgressFill').style.width = `${((current + 1) / total) * 100}%`;
+        document.getElementById('studyProgressLabel').textContent = `${current + 1} of ${total}`;
+        document.getElementById('studyTopicTitle').textContent = t.topic;
+
+        const tagEl = document.getElementById('studyTopicTag');
+        tagEl.textContent = t.tag;
+        tagEl.className = `result-tag tag-color-${t.tagColor}`;
+
+        document.getElementById('btnPrev').style.visibility = current === 0 ? 'hidden' : 'visible';
+
+        const nextBtn = document.getElementById('btnNext');
+        if (current === total - 1) {
+            nextBtn.textContent = 'Done ✓';
+            nextBtn.classList.add('study-nav-done');
+            nextBtn.onclick = () => window.location.href = '/dashboard';
+        } else {
+            nextBtn.textContent = 'Next →';
+            nextBtn.classList.remove('study-nav-done');
+            nextBtn.onclick = () => navigate(1);
+        }
+
+        loadContent();
+    }
+
+    async function loadContent() {
+        if (cache[current]) { renderContent(cache[current]); return; }
+
+        document.getElementById('studyLoading').style.display = 'flex';
+        document.getElementById('studyContent').style.display = 'none';
+        document.getElementById('studyError').style.display = 'none';
+
+        const t = topics[current];
+        try {
+            const fd = new FormData();
+            fd.append('topic', t.topic);
+            fd.append('tag', t.tag);
+            const res = await fetch('/dashboard/generatetopiccontent', { method: 'POST', body: fd });
+            const data = await res.json();
+            if (data.error) throw new Error(data.error);
+            cache[current] = data;
+            renderContent(data);
+        } catch (e) {
+            document.getElementById('studyLoading').style.display = 'none';
+            const err = document.getElementById('studyError');
+            err.textContent = e.message || 'Failed to load content. Please try again.';
+            err.style.display = 'block';
+        }
+    }
+
+    function renderContent(data) {
+        document.getElementById('studyLoading').style.display = 'none';
+        document.getElementById('studyContent').style.display = 'block';
+
+        document.getElementById('contentWhat').textContent = data.what ?? '';
+        document.getElementById('contentWhy').textContent = data.why ?? '';
+        document.getElementById('contentExample').textContent = data.example ?? '';
+
+        const list = document.getElementById('contentKeyPoints');
+        list.innerHTML = '';
+        (data.keyPoints ?? []).forEach(pt => {
+            const li = document.createElement('li');
+            li.textContent = pt;
+            list.appendChild(li);
+        });
+    }
+
+    function navigate(dir) {
+        current = Math.max(0, Math.min(topics.length - 1, current + dir));
+        updateUI();
+    }
+
+    updateUI();
+</script>

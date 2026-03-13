@@ -14,4 +14,5 @@ public class UserScoreRecord
     public string BandLabel { get; set; } = "";
     public string BandColor { get; set; } = "";
     public DateTime CompletedAt { get; set; } = DateTime.UtcNow;
+    public string WeakPointsJson { get; set; } = "[]";
 }

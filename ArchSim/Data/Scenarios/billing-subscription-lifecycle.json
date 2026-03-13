@@ -18,6 +18,7 @@
   "steps": [
     {
       "stepNumber": 1,
+      "topic": "Saga Pattern & Compensating Transactions",
       "interviewerSays": "A trial customer clicks 'Upgrade to Paid'. This single action needs to charge their card, activate their subscription, unlock premium features, and send a welcome email. These touch four different services. How do you design this so a partial failure — say the charge succeeds but feature unlock fails — does not leave the system in an inconsistent state?",
       "context": "This is the distributed transaction problem. There is no global ACID transaction across microservices. They want to see if you know the Saga pattern and can articulate compensating transactions clearly.",
       "type": "single-choice",
@@ -97,6 +98,7 @@
     },
     {
       "stepNumber": 2,
+      "topic": "Plan Downgrade with Grace Periods & Soft Limits",
       "interviewerSays": "Good. Now a different scenario. An enterprise client is downgrading from Premium to Basic plan. Premium allowed 100GB storage and 50 active users. Basic allows 20GB and 10 users. This client currently has 47GB of data and 38 active users. How do you handle this downgrade architecturally — what happens to the overage, and how do you design the system to enforce new plan limits without destroying customer data?",
       "context": "This is a deceptively complex product and architecture problem. The wrong answer destroys customer data or blocks the downgrade entirely. The right answer introduces a grace period model with soft and hard limits — a pattern used by every mature SaaS billing system.",
       "type": "single-choice",
@@ -176,6 +178,7 @@
     },
     {
       "stepNumber": 3,
+      "topic": "Cancellation State Design & Reactivation",
       "interviewerSays": "Final question. A client cancelled their subscription 6 months ago. Your retention policy keeps their data for 12 months post-cancellation. They have just called your sales team and want to reactivate. They expect their data, users, configuration, and integrations to be exactly as they left them. How did you design the system at cancellation time to make this reactivation possible — and what does the reactivation flow look like?",
       "context": "This tests forward-thinking design. Most engineers think about cancellation as a delete operation. Senior architects think about cancellation as a state transition that must preserve future reactivation capability. The design decision at cancellation time determines whether reactivation is a 5-minute automated flow or a 2-week manual restoration nightmare.",
       "type": "single-choice",

@@ -18,6 +18,7 @@
   "steps": [
     {
       "stepNumber": 1,
+      "topic": "Presigned URL Upload Flow",
       "interviewerSays": "DocFlow needs to let users upload files up to 500MB — CSVs, PDFs, and images. Your first instinct might be to accept the file in a POST request to your API, save it, and return a success response. Why might that be a problem at scale, and how would you redesign the upload flow?",
       "context": "This tests whether the engineer understands why large file uploads should never go through the API server. The correct answer introduces presigned URLs — a pattern used by AWS S3, Azure Blob Storage, and every major storage provider. Many 3-5 year engineers have used this pattern but cannot explain why it exists.",
       "type": "single-choice",
@@ -97,6 +98,7 @@
     },
     {
       "stepNumber": 2,
+      "topic": "Async Job Pipeline & Status Tracking",
       "interviewerSays": "Good. The file is now in blob storage. We need to run three processing steps on it: a virus scan, content parsing to extract structured data, and thumbnail generation for image files. Each step takes between 5 and 90 seconds. How do you design the processing pipeline, and how does the user know what is happening with their file?",
       "context": "This tests whether the engineer understands why long-running work must be async, how to model job status, and how to communicate progress back to the user without polling hammering the server. Many mid-level engineers make the processing synchronous and wonder why their API times out.",
       "type": "single-choice",
@@ -176,6 +178,7 @@
     },
     {
       "stepNumber": 3,
+      "topic": "Idempotency & Content Hashing",
       "interviewerSays": "Good pipeline design. Now a reliability problem. A user uploads the same CSV file twice — maybe they got impatient and clicked upload again, or their client retried after a network hiccup. Your worker picks up both processing jobs and runs them concurrently. What problems does this cause, and how do you design the system to handle duplicate processing safely?",
       "context": "This is the idempotency problem. It is one of the most important concepts in distributed systems and one of the least understood by mid-level engineers. They know what idempotency means in HTTP (GET is idempotent, POST is not) but most have never had to design for it in a processing pipeline.",
       "type": "single-choice",
@@ -255,6 +258,7 @@
     },
     {
       "stepNumber": 4,
+      "topic": "Virus Scan Incident Response",
       "interviewerSays": "The pipeline is running. At 11am, your virus scanner flags an uploaded file — a PDF submitted by a finance user at one of DocFlow's enterprise tenants. The scan result is: INFECTED. The file contains a known macro exploit. What exactly happens now — walk me through every action the system must take, in order, and explain why the sequence matters.",
       "context": "This tests security thinking and fail-fast pipeline design. The wrong answers either continue processing the infected file, notify the user too late, or leave traces of the infected content in the system. The right answer is a precise, ordered shutdown of that file's lifecycle with no data leakage between steps.",
       "type": "single-choice",
@@ -333,6 +337,7 @@
     },
     {
       "stepNumber": 5,
+      "topic": "Job Timeout & Watchdog Pattern",
       "interviewerSays": "It is 3pm on a Tuesday. A DocFlow enterprise user raises a support ticket — they uploaded a large CSV file at 10am, it has been showing 'Processing' for 5 hours, and nothing has happened. Your team investigates. The worker picked up the job, started content parsing, and then went silent. No error in the logs. No status update. The job is just stuck. How do you detect this class of problem automatically — before users have to raise a support ticket — and how do you design the system to recover from it?",
       "context": "This tests production observability and self-healing system design. A 3-5 year engineer who has only worked in development rarely thinks about what happens when a job silently hangs. The right answer introduces job timeout detection, Application Insights alerting, and automatic requeue — three production essentials that never appear in tutorials.",
       "type": "single-choice",

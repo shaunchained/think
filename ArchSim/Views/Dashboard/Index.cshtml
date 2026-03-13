@@ -60,7 +60,7 @@
                         <tr>
                             <th>Scenario</th>
                             <th>Category</th>
-                            <th>Difficulty</th>
+                            @* <th>Difficulty</th> *@
                             <th>Score</th>
                             <th>Result</th>
                             <th>Completed</th>
@@ -74,7 +74,7 @@
                             <tr>
                                 <td class="dash-scenario-name">@record.ScenarioTitle</td>
                                 <td><span class="badge badge-cat">@record.Category</span></td>
-                                <td><span class="badge badge-diff badge-diff-@record.Difficulty.ToLower()">@record.Difficulty</span></td>
+                                @* <td><span class="badge badge-diff badge-diff-@record.Difficulty.ToLower()">@record.Difficulty</span></td> *@
                                 <td>
                                     <div class="dash-score-bar">
                                         <div class="dash-score-fill" style="width:@pct%"></div>
@@ -93,4 +93,84 @@
             </div>
         }
     </div>
+
+    @if (Model.WeakAreas.Any())
+    {
+        <div class="dash-section">
+            <div class="dash-section-header">
+                <h2 class="dash-section-title">Areas to Strengthen</h2>
+            </div>
+            <div class="dash-summary-wrap">
+                <p class="dash-summary-hint">Get a personalised analysis of your weak areas and what to study next.</p>
+                <div class="dash-summary-actions">
+                    <button id="btn-generate-summary" class="btn-generate-summary" onclick="generateSummary()">
+                        <span id="btn-generate-summary-text">Generate Summary</span>
+                        <span id="btn-generate-summary-spinner" class="summary-spinner" style="display:none">Generating…</span>
+                    </button>
+                    <a href="/dashboard/studyplan" class="btn-study-plan">Study Weak Areas →</a>
+                </div>
+                <div id="summary-result" class="summary-card" style="display:none"></div>
+            </div>
+        </div>
+    }
+
+    @if (Model.RecommendedScenarios.Any())
+    {
+        <div class="dash-section">
+            <div class="dash-section-header">
+                <h2 class="dash-section-title">Try Next</h2>
+            </div>
+            <div class="reco-grid">
+                @foreach (var s in Model.RecommendedScenarios)
+                {
+                    <a href="/scenario/@s.Id" class="reco-card">
+                        <span class="reco-card-category">@s.Category</span>
+                        <div class="reco-card-title">@s.Title</div>
+                        <p class="reco-card-desc">@s.Description</p>
+                        <div class="reco-card-footer">
+                            <span>⏱ @s.EstimatedMinutes min</span>
+                            <span>@s.TotalSteps questions</span>
+                            <span class="reco-card-link">Start →</span>
+                        </div>
+                    </a>
+                }
+            </div>
+        </div>
+    }
 </div>
+
+@if (Model.WeakAreas.Any())
+{
+    <script>
+        async function generateSummary() {
+            const btn = document.getElementById('btn-generate-summary');
+            const btnText = document.getElementById('btn-generate-summary-text');
+            const spinner = document.getElementById('btn-generate-summary-spinner');
+            const resultBox = document.getElementById('summary-result');
+
+            btn.disabled = true;
+            btnText.style.display = 'none';
+            spinner.style.display = 'inline';
+            resultBox.style.display = 'none';
+
+            try {
+                const res = await fetch('/dashboard/generatesummary', { method: 'POST' });
+                const data = await res.json();
+
+                if (data.error) {
+                    resultBox.innerHTML = `<span class="summary-error">${data.error}</span>`;
+                } else {
+                    resultBox.textContent = data.summary;
+                }
+                resultBox.style.display = 'block';
+            } catch {
+                resultBox.innerHTML = '<span class="summary-error">Something went wrong. Please try again.</span>';
+                resultBox.style.display = 'block';
+            }
+
+            btn.disabled = false;
+            btnText.style.display = 'inline';
+            spinner.style.display = 'none';
+        }
+    </script>
+}

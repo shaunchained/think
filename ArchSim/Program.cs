@@ -49,6 +49,7 @@ builder.Services.AddAuthentication(options =>
     options.ClaimActions.MapJsonKey("picture", "picture");
 });
 
+builder.Services.AddHttpClient();
 builder.Services.AddSingleton<ScenarioLoader>();
 builder.Services.AddSingleton<ScoreCalculator>();
 

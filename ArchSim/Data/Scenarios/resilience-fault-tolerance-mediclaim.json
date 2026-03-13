@@ -56,6 +56,7 @@
   "steps": [
     {
       "stepNumber": 1,
+      "topic": "Durable Async Message-Driven Ingestion",
       "interviewerSays": "Right now, MediClaim360 accepts claims via a synchronous HTTP POST. The API controller calls the Document Validation Service, which calls Fraud Scoring, which calls Policy Verification, which calls Payment Settlement — all in a single synchronous chain. When the Fraud Scoring Service went down last Tuesday for 22 minutes, every claim submitted during that window returned a 500 error and was lost permanently. The hospital resubmitted manually — duplicates everywhere. How do you redesign claim ingestion so that no claim is ever lost, regardless of what happens downstream?",
       "context": "This tests the fundamental shift from synchronous brittle pipelines to durable async message-driven ingestion. A 5-8 year engineer must articulate WHY synchronous chaining is a resilience anti-pattern and what durable messaging buys you.",
       "type": "single-choice",
@@ -129,6 +130,7 @@
     },
     {
       "stepNumber": 2,
+      "topic": "Poison Message Handling & Dead Letter Queue",
       "interviewerSays": "Service Bus is live. Claims are flowing through the queue. But your on-call engineer notices something alarming at 2am — the claims.processing queue has 3,000 messages that have not moved in 4 hours. Investigation reveals one specific claim from InsureCo — ClaimId: IC-2024-887432 — is crashing the Claim Processor every single time it is dequeued. The Service Bus message lock expires, the message goes back to the front of the queue, the processor picks it up again, crashes again. This has happened 47 times. 3,000 valid claims are stuck behind this one bad message. How do you design the system to handle this?",
       "context": "This is the poison message problem — one bad message that perpetually crashes the consumer and blocks everything behind it. A 5-8 year engineer must know the Dead Letter Queue pattern and how to configure Service Bus delivery count to automatically isolate poison messages.",
       "type": "single-choice",
@@ -207,6 +209,7 @@
     },
     {
       "stepNumber": 3,
+      "topic": "Idempotency Keys & Checkpoint Pattern",
       "interviewerSays": "The queue is healthy. Claims are processing. But your payment team raises a critical issue — when a claim fails at Step 4 (Payment Settlement) and is redelivered by Service Bus, Steps 1, 2, and 3 run again from scratch. Document Validation runs twice. Fraud Scoring is called twice — you are billed per API call by the fraud vendor, so this is costing real money. Policy Verification queries the database twice. And occasionally, Step 4 itself runs twice and a hospital receives a duplicate payment. How do you redesign the claim processing pipeline to make every step safe to run multiple times without side effects?",
       "context": "This is the idempotency problem — the most important correctness guarantee in any at-least-once messaging system. A 5-8 year engineer must be able to articulate idempotency keys and the checkpoint pattern, and understand why at-least-once delivery makes idempotency non-negotiable.",
       "type": "single-choice",
@@ -285,6 +288,7 @@
     },
     {
       "stepNumber": 4,
+      "topic": "Graceful Degradation & Circuit Breaker",
       "interviewerSays": "It is 10:30am on a Thursday. Your fraud vendor — a third-party AI engine that scores every claim — sends an incident notification: they are experiencing a major outage, ETA to recovery is 4 hours. 14,000 claims per hour are flowing in. You cannot process claims without a fraud score — or can you? Your CEO is asking for options in the next 10 minutes. How have you designed the system to degrade gracefully during a fraud scoring vendor outage without halting all claim processing and without compromising fraud controls?",
       "context": "This tests graceful degradation design and the fallback strategy pattern. The wrong answer halts all processing. The right answer has a pre-designed degraded mode that keeps claims moving while maintaining an acceptable fraud control posture — and a Circuit Breaker that stops hammering a dead vendor.",
       "type": "single-choice",
@@ -363,6 +367,7 @@
     },
     {
       "stepNumber": 5,
+      "topic": "Production Triage & Dependency Reasoning",
       "interviewerSays": "It is a Friday afternoon. Three things are degrading simultaneously on MediClaim360. Application Insights shows: Azure SQL is at 87% DTU utilisation and climbing. The Service Bus claims.processing queue depth is at 45,000 messages and growing. Redis is throwing eviction warnings — keys are being dropped due to memory pressure. Your on-call team has 10 minutes to make triage decisions before this becomes a full platform outage. What is your triage order and what is the first action you take for each?",
       "context": "This is a system-thinking question under pressure. It tests whether the engineer understands the dependency relationships between components — which failure causes which other failure, and therefore which to fix first. There is no single correct technical answer, but there is a correct reasoning process.",
       "type": "single-choice",

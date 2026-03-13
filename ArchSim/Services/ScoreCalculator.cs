@@ -30,6 +30,8 @@ public class ScoreCalculator
                 Question = step.InterviewerSays.Length > 80
                     ? step.InterviewerSays[..80] + "..."
                     : step.InterviewerSays,
+                Topic = step.Topic,
+                Context = step.Context,
                 SelectedOptionText = selectedOption?.Text ?? "(no answer)",
                 SelectedOptionId = answer?.OptionId ?? "",
                 Score = answer?.Score ?? 0,

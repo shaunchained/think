@@ -18,6 +18,7 @@
   "steps": [
     {
       "stepNumber": 1,
+      "topic": "HTTP Status Codes",
       "interviewerSays": "You build the registration endpoint — POST /api/users. A user submits their details and is registered successfully. What HTTP status code do you return, and why does it matter which code you choose?",
       "context": "This tests whether the junior engineer understands that HTTP status codes are a contract — not just numbers. Most juniors return 200 for everything because it works. The correct answer is 201 Created with a specific reason.",
       "type": "single-choice",
@@ -95,6 +96,7 @@
     },
     {
       "stepNumber": 2,
+      "topic": "Input Validation",
       "interviewerSays": "Good. Now a user submits the registration form with an empty email, a name that is 500 characters long, and a password of '123'. How do you handle input validation — what do you validate, where do you validate it, and what do you return to the user?",
       "context": "Input validation is the first line of defence for any API. Many juniors either skip validation entirely, validate only on the frontend, or validate in the wrong layer. The correct answer covers what to validate, validating on the server always, and returning actionable error messages.",
       "type": "single-choice",
@@ -172,6 +174,7 @@
     },
     {
       "stepNumber": 3,
+      "topic": "Password Hashing & Secure Storage",
       "interviewerSays": "Validation passes. You need to store the user's password in the database. How do you store it, and why does your choice matter?",
       "context": "Password storage is one of the most important security decisions a junior engineer makes. Many juniors store passwords as plain text or use MD5/SHA1 hashing without understanding why those are wrong. The correct answer is bcrypt or a modern password hashing algorithm with explanation of why.",
       "type": "single-choice",
@@ -251,6 +254,7 @@
     },
     {
       "stepNumber": 4,
+      "topic": "API Response Design",
       "interviewerSays": "The user is registered. What do you include in the API response, and what must you be absolutely careful never to return?",
       "context": "Response design tests whether the junior engineer thinks about what data the client actually needs versus what data exists in the database. Many juniors return the entire database row, accidentally exposing sensitive fields like password hashes, internal IDs used for security, or fields meant for internal use only.",
       "type": "single-choice",
@@ -328,6 +332,7 @@
     },
     {
       "stepNumber": 5,
+      "topic": "Error Response Security",
       "interviewerSays": "Your API is working correctly. Now think about what happens when things go wrong — an unhandled exception occurs during registration. What should your error response look like, and what information should you never include in it?",
       "context": "Error response design tests whether the junior engineer understands the difference between information useful to a developer and information useful to an attacker. Stack traces, database error messages, and internal paths in error responses are a gift to anyone probing your API for vulnerabilities.",
       "type": "single-choice",
@@ -405,6 +410,7 @@
     },
     {
       "stepNumber": 6,
+      "topic": "Rate Limiting & Abuse Prevention",
       "interviewerSays": "Last question. Your registration API is live. A malicious user writes a script that registers 10,000 fake accounts in an hour — flooding your database, consuming your resources, and bypassing your email verification system. What would you have built into the API from the beginning to prevent this?",
       "context": "Rate limiting is a fundamental API protection that many juniors skip because it is not core to the happy path. This tests whether the engineer thinks about abuse scenarios during design, not just after an incident occurs.",
       "type": "single-choice",
