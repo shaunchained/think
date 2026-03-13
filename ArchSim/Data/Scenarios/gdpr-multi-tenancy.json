@@ -4,281 +4,442 @@
   "category": "Multi-tenancy Design",
   "difficulty": "5-10 yrs",
   "sequence": 3,
-  "estimatedMinutes": 5,
-  "description": "A German enterprise client is evaluating your LMS platform. Navigate the architecture interview — from data isolation to tenant routing and cache invalidation.",
+  "estimatedMinutes": 12,
+  "description": "A German enterprise client is evaluating your LMS platform. Navigate the architecture interview — from data isolation to tenant routing, cache invalidation, automated provisioning, and cross-tenant leakage defence.",
+  "overview": "EduCore is a B2B Learning Management System (LMS) SaaS platform built on ASP.NET Web API (.NET 8), hosted on Azure Kubernetes Service (AKS). Mid-to-large enterprises across Europe use EduCore to deliver employee training, compliance certification, and skills development programmes. Each customer is a separate tenant — a distinct company with its own users, course content, completion records, and reporting data.\n\nEduCore currently serves 140 enterprise tenants across the UK, Germany, Netherlands, and France. The platform runs on AKS (multi-node cluster, West Europe) for compute; Azure SQL (General Purpose, 8 vCores) as the primary data store for tenant data, course records, and user profiles; Azure Cache for Redis (Standard C2) for session state, tenant routing cache, and API response caching; Azure Blob Storage for course content, video assets, and completion certificates; Azure API Management as the gateway handling all inbound traffic; and Application Insights for telemetry and alerting.\n\nThe platform uses a subdomain-per-tenant model — each tenant accesses EduCore via their own subdomain, for example acme.educore.io and globex.educore.io. Tenant routing, identity resolution, and request forwarding are handled at the APIM layer before requests reach application code.\n\nA German enterprise — Müller Industrietechnik GmbH, 4,200 employees — has signed a contract for a company-wide compliance training rollout. Their data must remain within Germany under GDPR. Tenant provisioning today is a manual two-day process. And the shared caching layer has no tenant-level isolation guarantees.",
   "tags": [
     "multi-tenancy",
     "GDPR",
     "Azure",
     "SQL Server",
-    "Redis"
+    "Redis",
+    "AKS",
+    "Infrastructure-as-Code",
+    "Security"
   ],
   "interviewer": {
     "name": "Sarah Chen",
-    "role": "Principal Architect, FAANG",
+    "role": "Principal Architect",
     "avatar": "SC"
   },
   "steps": [
     {
       "stepNumber": 1,
-      "interviewerSays": "A German enterprise client asks: How is their data isolated from other tenants on your platform?",
-      "context": "Opening question. They want to see if you understand multi-tenancy models at depth — and whether you recognise that GDPR changes the answer.",
+      "interviewerSays": "Müller Industrietechnik's legal team asks directly: how is their data isolated from other tenants on EduCore? They are a German company. GDPR compliance is non-negotiable for them.",
+      "context": "Opening question. They want to see if you understand multi-tenancy models at depth — and whether you recognise that GDPR data residency changes the answer beyond simple logical isolation.",
       "type": "single-choice",
       "options": [
         {
           "id": "A",
-          "text": "Shared database with TenantId column on every table, enforced via row-level security",
+          "text": "Shared database with TenantId column on every table, enforced via row-level security — their data is logically isolated from every other tenant and no query can cross the boundary",
           "score": 3,
-          "tag": "Partially Correct",
+          "tag": "Fails GDPR Residency",
           "tagColor": "yellow",
-          "interviewerReaction": "Hmm — that handles logical isolation, but what about GDPR data residency requirements for this specific client?"
+          "interviewerReaction": "Row-level security handles logical isolation — but Müller's legal team is not asking about logic, they are asking about physics. Where does their data physically live? Under the shared model it sits on the same server, in the same database, backed up to the same storage as every other tenant — including non-EU companies. That fails GDPR Article 46 data residency requirements. How do you address where the data physically resides?"
         },
         {
           "id": "B",
-          "text": "Dedicated Geo-Pod in Germany with isolated compute, database, cache, storage and logging",
+          "text": "A dedicated Geo-Pod in Germany — isolated compute on AKS, a dedicated Azure SQL database, a dedicated Redis cache, dedicated Blob Storage, and a dedicated Log Analytics workspace, all provisioned in the Germany North region. Nothing from Müller's tenancy leaves German soil.",
           "score": 10,
           "tag": "Excellent",
           "tagColor": "green",
-          "interviewerReaction": "Good thinking. You addressed both isolation and data residency. Now — how do you identify which tenant a request belongs to?"
+          "interviewerReaction": "Exactly right — and notice you mentioned Log Analytics specifically. Most architects get the database right and forget that logs contain IP addresses and user activity, which are personal data under GDPR. Full Geo-Pod is the only compliant answer for a regulated German client. Now — how do you identify which tenant a request belongs to and route it to the correct pod?"
         },
         {
           "id": "C",
-          "text": "Separate database per tenant, hosted globally in the nearest region",
+          "text": "A separate Azure SQL database per tenant, hosted in the nearest Azure region to that tenant — Müller gets a database in Germany North, other tenants get databases in West Europe",
           "score": 5,
-          "tag": "Incomplete",
+          "tag": "Partial — Missing Layers",
           "tagColor": "orange",
-          "interviewerReaction": "You addressed database isolation but missed the data residency requirement — this client's data cannot leave German soil under GDPR Article 46."
+          "interviewerReaction": "Separate database in Germany is a good start — but the database is only one layer. What about the compute that processes Müller's requests? What about the Redis cache that holds their session data? What about the Log Analytics workspace that captures their users' activity logs and IP addresses? GDPR does not care only about the database. Every layer that touches personal data must be within Germany."
         }
       ],
       "idealAnswer": {
-        "summary": "For a GDPR-regulated German client, the correct approach is a full regional Geo-Pod deployment — not just database isolation.",
+        "summary": "For a GDPR-regulated German client, the correct approach is a full regional Geo-Pod deployment — not just database isolation. Every layer that touches personal data must be physically within Germany.",
         "sections": [
           {
             "type": "text",
             "heading": "The Three Multi-Tenancy Models",
-            "content": "Multi-tenancy has three primary isolation models:\n\n• Pool Model — Shared database with TenantId on every table. Cheapest to operate, but weak isolation and fails GDPR data residency.\n\n• Bridge Model — Shared database server, separate schema per tenant. Better logical isolation, still same physical infrastructure.\n\n• Silo Model — Dedicated database (and optionally compute) per tenant. Strongest isolation. For GDPR clients, Silo is mandatory regardless of their plan tier."
+            "content": "Multi-tenancy has three primary isolation models:\n\nPool Model — Shared database with TenantId on every table. Cheapest to operate, but weak isolation and fails GDPR data residency. Suitable for small, non-regulated customers.\n\nBridge Model — Shared database server, separate schema or database per tenant. Better logical isolation, still same physical infrastructure. Fails GDPR for EU-regulated clients.\n\nSilo Model — Dedicated database and optionally dedicated compute per tenant. Strongest isolation. For GDPR clients, Silo is mandatory regardless of plan tier — it is a legal requirement, not a product feature.\n\nThese three models are not alternatives — they are tiers. The same platform can serve small customers on Pool, enterprise customers on Bridge, and regulated enterprise customers on Silo. Your architecture tiering and your pricing tiering are the same decision described in two different languages."
           },
           {
             "type": "architecture-block",
-            "heading": "EU Geo-Pod Architecture",
-            "content": "┌─────────────────────────────────────────┐\n│         EU GEO-POD (Germany)            │\n│                                         │\n│  ┌──────────┐  ┌─────────┐  ┌────────┐ │\n│  │   AKS    │  │  Redis  │  │ SQL DB │ │\n│  │  Nodes   │  │  Cache  │  │  (DE)  │ │\n│  └──────────┘  └─────────┘  └────────┘ │\n│                                         │\n│  ┌──────────────────────────────────┐   │\n│  │   Blob Storage (Germany North)   │   │\n│  └──────────────────────────────────┘   │\n│                                         │\n│  ┌──────────────────────────────────┐   │\n│  │  Log Analytics Workspace (EU)    │   │\n│  └──────────────────────────────────┘   │\n└─────────────────────────────────────────┘\n         ↕ VNet Peering only\n┌─────────────────────────────────────────┐\n│         GLOBAL CONTROL PLANE            │\n│   (Tenant Registry, Billing, Auth)      │\n└─────────────────────────────────────────┘"
+            "heading": "EduCore Geo-Pod Architecture — Germany",
+            "content": "  ┌──────────────────────────────────────────────────┐\n  │          EU GEO-POD — Germany North              │\n  │          (Müller Industrietechnik GmbH)           │\n  │                                                  │\n  │  ┌────────────────┐  ┌─────────────────────────┐ │\n  │  │  AKS Namespace │  │  Azure SQL (Germany)    │ │\n  │  │  muller-ns     │  │  DB: muller-db          │ │\n  │  │  Isolated pods │  │  Business Critical tier │ │\n  │  └────────────────┘  └─────────────────────────┘ │\n  │                                                  │\n  │  ┌────────────────┐  ┌─────────────────────────┐ │\n  │  │  Redis Cache   │  │  Blob Storage           │ │\n  │  │  (Germany)     │  │  Germany North          │ │\n  │  │  Sessions only │  │  Course content, certs  │ │\n  │  └────────────────┘  └─────────────────────────┘ │\n  │                                                  │\n  │  ┌──────────────────────────────────────────┐   │\n  │  │  Log Analytics Workspace — Germany       │   │\n  │  │  Backups: Germany West Central only      │   │\n  │  └──────────────────────────────────────────┘   │\n  └──────────────────────────────────────────────────┘\n               ↕ VNet Peering only\n  ┌──────────────────────────────────────────────────┐\n  │          GLOBAL CONTROL PLANE (West Europe)      │\n  │   Tenant Registry | Billing | Auth (no PII)      │\n  └──────────────────────────────────────────────────┘"
           },
           {
             "type": "key-principles",
             "heading": "Key Principles",
             "items": [
-              "GDPR compliance overrides cost optimisation decisions — bill it as a Data Residency Premium tier",
-              "ALL layers must be regional: compute, cache, database, blob storage, and logs",
-              "Backups replicate only to the paired EU region (Germany North ↔ Germany West Central)",
-              "Log Analytics is the layer teams most commonly forget — it contains IP addresses and user activity",
-              "The Global Control Plane (auth, billing) can stay centralised — it holds no PII from this tenant"
+              "GDPR compliance overrides cost optimisation — a dedicated Geo-Pod is non-negotiable for regulated EU clients regardless of their plan size",
+              "ALL layers must be regional: compute, database, cache, blob storage, and Log Analytics — logs contain IP addresses and user activity which are personal data",
+              "Backups must replicate only to the paired EU region — Germany North pairs with Germany West Central. Never to US East or any non-EU region",
+              "Log Analytics is the layer most architects forget — it captures personal data and must stay within the regional boundary",
+              "The Global Control Plane (auth tokens, billing records) can stay centralised only if it holds no PII from the tenant — tenant metadata without personal data is acceptable"
             ]
           },
           {
             "type": "warning",
-            "heading": "Most Common Production Mistake",
-            "content": "Teams correctly isolate the SQL database but forget that Redis cache and Log Analytics workspaces also contain PII — user sessions, activity logs, IP addresses. All of these must stay within the German region boundary. A single misconfigured Log Analytics workspace sending data to West Europe will constitute a GDPR breach."
+            "heading": "The Layer Engineers Most Commonly Miss",
+            "content": "Teams correctly isolate the SQL database but forget that Redis cache and Log Analytics workspaces also contain personal data — user sessions contain user IDs and IP addresses, activity logs contain behaviour data. A database in Germany North with Log Analytics shipping telemetry to a West Europe workspace is a GDPR breach, regardless of how well the database is isolated.\n\nWhen a client's legal team asks about GDPR compliance, the correct answer covers every data-bearing layer — not just the one that appears in your database schema."
           },
           {
             "type": "tradeoffs",
             "heading": "Trade-offs",
             "pros": [
-              "Full GDPR compliance and legal defensibility under Article 46",
-              "Strong tenant isolation at every infrastructure layer",
-              "Independent backup, restore, and failover per tenant",
-              "Pod can be suspended or destroyed independently (tenant offboarding)"
+              "Full GDPR compliance and legal defensibility under Article 46 — no ambiguity about where data lives",
+              "Strong tenant isolation at every infrastructure layer — a bug in another tenant's pod cannot affect this one",
+              "Independent backup, restore, and failover per tenant — incident blast radius is contained",
+              "Pod can be deprovisioned independently during tenant offboarding with clean data deletion"
             ],
             "cons": [
-              "Higher infrastructure cost — mitigate by charging as a Data Residency Premium tier",
-              "More complex automated onboarding pipeline (Infrastructure-as-Code required)",
-              "Operational overhead: managing, monitoring, and patching regional stacks separately"
+              "Higher infrastructure cost per tenant — mitigate by pricing as a Data Residency Premium tier",
+              "Complex automated provisioning pipeline required — manual provisioning does not scale beyond a handful of Geo-Pod tenants",
+              "Operational overhead of monitoring and patching regional stacks separately"
             ]
           }
         ],
-        "oneLineSummary": "GDPR compliance is not just a database decision — it is a full-stack regional architecture decision covering compute, cache, storage, and logs."
+        "oneLineSummary": "GDPR compliance is not a database decision — it is a full-stack regional decision covering compute, cache, database, storage, and logging."
       }
     },
     {
       "stepNumber": 2,
-      "interviewerSays": "Good. Now walk me through how your platform identifies which tenant a request belongs to, and routes it to the correct regional pod.",
-      "context": "Tenant identification and routing is where many systems have subtle security bugs. They want to see if you think about spoofing, header injection, and multi-region routing.",
+      "interviewerSays": "Good. EduCore uses subdomains — muller.educore.io, acme.educore.io. Walk me through exactly how the platform identifies which tenant a request belongs to and routes it to the correct regional pod. What are the failure modes and security risks in this flow?",
+      "context": "Tenant identification and routing is where many systems have subtle security bugs. The question probes whether the engineer thinks about spoofing, header injection, registry availability, and multi-region routing — not just the happy path.",
       "type": "single-choice",
       "options": [
         {
           "id": "A",
-          "text": "Read TenantId from a custom request header — X-Tenant-Id — set by the client application",
+          "text": "Read TenantId from a custom request header — X-Tenant-Id — set by the client application on every request. The API validates this header and uses it to scope all database queries",
           "score": 2,
-          "tag": "Risky",
+          "tag": "BOLA Vulnerability",
           "tagColor": "orange",
-          "interviewerReaction": "That is a serious security issue — any client can forge that header and access another tenant's data. How would you prevent that?"
+          "interviewerReaction": "That is a Broken Object Level Authorisation vulnerability — OWASP API Security number one. Any client can forge that header and supply a different tenant's ID. There is nothing stopping a user of Acme Corp from setting X-Tenant-Id: muller and reading Müller's data if your only check is that header. Tenant identity must come from a source the client cannot forge. What is that source in EduCore's subdomain model?"
         },
         {
           "id": "B",
-          "text": "Use subdomain-based routing — client.yourdomain.com — extract tenant from the Host header, look up in a tenant registry, then route to the correct pod",
+          "text": "Extract the subdomain from the Host header at APIM — the gateway layer — look up the tenant in a registry to get their pod endpoint and region, forward the request to the correct pod with an HMAC-signed internal header containing the resolved tenant ID. Application code validates the HMAC signature before trusting the tenant context. JWT claims provide a second validation layer.",
           "score": 10,
           "tag": "Excellent",
           "tagColor": "green",
-          "interviewerReaction": "Solid. Subdomain routing is the industry standard. Now tell me — what happens to cached data when a tenant is suspended?"
+          "interviewerReaction": "Exactly right. Resolution happens at the gateway from a signal the client cannot forge — the subdomain. The HMAC-signed internal header means application code can verify the tenant context was set by the gateway, not injected by a caller. JWT claims as defence in depth. What happens if the tenant registry is unavailable — the lookup fails?"
         },
         {
           "id": "C",
-          "text": "Embed TenantId in the JWT access token at login time and read it from the token on every request",
+          "text": "Embed TenantId in the JWT access token at login and read it from the token on every subsequent request — the token is signed so it cannot be tampered with, and it carries all the tenant context the application needs",
           "score": 6,
-          "tag": "Partially Correct",
+          "tag": "Incomplete — Missing Routing Layer",
           "tagColor": "yellow",
-          "interviewerReaction": "JWT claims are a good secondary signal, but the primary routing decision should happen before token validation — at the gateway level. What if the token is stolen and replayed?"
+          "interviewerReaction": "JWT claims are a good validation layer — signed, tamper-proof, correct. But they solve the wrong problem at the wrong layer. The routing decision — which regional pod does this request go to — must happen at the gateway before the token is even decoded. A JWT does not tell Azure Front Door or APIM to forward this request to Germany North rather than West Europe. What signal does the gateway use to make the routing decision before any application code runs?"
         }
       ],
       "idealAnswer": {
-        "summary": "Tenant identification should happen at the network edge using subdomain-based routing — before any application code runs. JWT claims are a secondary validation layer, not the primary routing mechanism.",
+        "summary": "Tenant identification must happen at the network edge using the subdomain — a signal the client cannot forge. The gateway resolves tenant identity, routes to the correct pod, and passes a signed internal header. Application code validates the signature and cross-checks against JWT claims for defence in depth.",
         "sections": [
           {
             "type": "text",
-            "heading": "Tenant Identification Strategies",
-            "content": "There are three common patterns for identifying tenants in a multi-tenant API:\n\n1. Custom Header (X-Tenant-Id) — Simple but dangerous. Any caller can forge the header. Never use as sole identification mechanism.\n\n2. JWT Claims — Include tenantId in the token payload. Secure against forgery (token is signed), but routing still needs to happen before the token is decoded.\n\n3. Subdomain Routing — client.yourdomain.com. The Host header is set by the network stack, not by client code. Extract at the API Gateway or reverse proxy layer before requests reach application code."
+            "heading": "Why the Subdomain Is the Right Signal",
+            "content": "In EduCore's model, muller.educore.io is only reachable if the DNS record exists for that subdomain. The client cannot navigate to muller.educore.io and supply acme.educore.io as their tenant — the subdomain in the Host header is set by the network stack, not by client code.\n\nThis makes the subdomain a trusted signal that is resolved before any application code runs — at the gateway layer. Three things happen there:\n\n1. The gateway extracts the subdomain from the Host header\n2. It looks up the tenant registry to get the pod endpoint and region for that tenant\n3. It routes the request to the correct pod with a signed internal header\n\nApplication code never makes a routing decision. It only processes requests that have already been correctly routed by the gateway."
           },
           {
             "type": "architecture-block",
-            "heading": "Request Routing Flow",
-            "content": "  Browser: acme.yourdomain.com/api/courses\n                    │\n                    ▼\n  ┌─────────────────────────────────┐\n  │   Azure Front Door / APIM       │\n  │  Extract: host = acme.*         │\n  │  Lookup:  TenantRegistry[acme]  │\n  │  Route:   → EU Geo-Pod (DE)     │\n  │  Inject:  X-Tenant-Id (signed)  │\n  └────────────┬────────────────────┘\n               │ (internal signed header)\n               ▼\n  ┌─────────────────────────────────┐\n  │   Application Layer (AKS)       │\n  │  Validate X-Tenant-Id HMAC      │\n  │  Validate JWT tenantId claim    │\n  │  Proceed with DB + Cache ops    │\n  └─────────────────────────────────┘"
+            "heading": "Full Request Routing Flow",
+            "content": "  Browser: muller.educore.io/api/courses\n                    │\n                    ▼\n  ┌──────────────────────────────────────────┐\n  │   Azure Front Door (global edge)         │\n  │   → Geo-routes to Germany North          │\n  │     based on tenant subdomain            │\n  └──────────────────┬───────────────────────┘\n                     │\n                     ▼\n  ┌──────────────────────────────────────────┐\n  │   Azure API Management (APIM) — Germany  │\n  │   → Extract: host = muller.educore.io    │\n  │   → Lookup: TenantRegistry[muller]       │\n  │     { tenantId: t-muller,                │\n  │       region: germany-north,             │\n  │       podEndpoint: muller-pod.internal,  │\n  │       status: ACTIVE }                   │\n  │   → If status != ACTIVE: return 403      │\n  │   → Sign internal header with HMAC:      │\n  │     X-Tenant-Context: t-muller           │\n  │     X-Tenant-Sig: HMAC(secret, header)   │\n  │   → Forward to muller-pod.internal       │\n  └──────────────────┬───────────────────────┘\n                     │\n                     ▼\n  ┌──────────────────────────────────────────┐\n  │   Application Layer (AKS — muller-ns)    │\n  │   → Validate HMAC signature              │\n  │     (reject if invalid — not from APIM)  │\n  │   → Extract tenantId: t-muller           │\n  │   → Validate JWT claim tenantId          │\n  │     matches t-muller                     │\n  │   → Scope all DB + Cache queries         │\n  │     to tenantId t-muller                 │\n  └──────────────────────────────────────────┘\n\n  REGISTRY CACHE (Redis — global):\n  Key: tenant:registry:muller\n  Value: { tenantId, region, podEndpoint, status }\n  TTL: 60 seconds\n  → Cache miss → DB lookup → re-cache\n  → Registry unavailable → serve from\n    stale cache for up to 5 minutes\n    with degraded status check"
           },
           {
             "type": "key-principles",
             "heading": "Key Principles",
             "items": [
-              "Tenant resolution must happen at the gateway — before application code — to enable correct pod routing",
-              "If you must pass tenant context as a header internally, sign it with HMAC so application code can verify it was set by the gateway, not a malicious caller",
-              "JWT tenantId claim provides defence-in-depth — validate it matches the gateway-resolved tenant",
-              "The tenant registry (id → pod endpoint mapping) must be highly available — a cache miss here blocks all tenants",
-              "Use wildcard TLS certificates (*.yourdomain.com) to support unlimited tenant subdomains without certificate provisioning delays"
+              "Tenant resolution must happen at the gateway from the subdomain — before any application code runs and before the JWT is decoded",
+              "HMAC-sign all internal tenant headers — application code verifies the signature to confirm the header was set by the gateway, not injected by a malicious caller",
+              "JWT tenantId claim provides defence in depth — if the claims do not match the gateway-resolved tenant, reject the request",
+              "Cache the tenant registry lookup aggressively — a registry miss adds latency to every single request. 60-second TTL with stale-while-revalidate is a reasonable default",
+              "The tenant registry must serve suspended status — the gateway checks status on every request and returns 403 before the request reaches application code"
             ]
           },
           {
             "type": "warning",
             "heading": "Security Anti-Pattern: Trusting Client-Supplied TenantId",
-            "content": "Never trust a TenantId that comes directly from the client request body or an unvalidated header. This is a Broken Object Level Authorisation (BOLA) vulnerability — OWASP API Security #1. An attacker can change the TenantId to access another tenant's data. All tenant identification must be resolved server-side from a trusted signal (subdomain, signed token) and validated at every layer."
+            "content": "Never trust a TenantId that originates from the client request body, query parameter, or an unvalidated header. This is Broken Object Level Authorisation (BOLA) — OWASP API Security Top 10 number one. An attacker authenticated as a user of Acme Corp supplies muller as the tenant ID and reads Müller's training records.\n\nAll tenant identification must be resolved server-side from a signal the client cannot forge, and validated at every layer — gateway, application, and data access. Three independent checks cost microseconds. One missing check costs you a breach."
           },
           {
             "type": "tradeoffs",
             "heading": "Trade-offs",
             "pros": [
-              "Subdomain routing enables pod-level routing before any app code runs",
-              "HMAC-signed internal headers prevent lateral movement across pods",
-              "Dual validation (gateway + JWT) gives defence in depth"
+              "Subdomain routing happens at the network edge — tenants cannot forge or manipulate their own identity",
+              "HMAC-signed internal headers prevent lateral movement — compromising one pod does not give access to another tenant's context",
+              "Dual validation (gateway + JWT) provides defence in depth with negligible performance overhead"
             ],
             "cons": [
-              "Requires wildcard DNS and TLS certificate management",
-              "Tenant registry becomes a critical dependency — must be cached aggressively",
-              "Adds latency at gateway for registry lookup — mitigate with in-memory cache with short TTL"
+              "Tenant registry becomes a critical dependency — must be cached aggressively with fallback behaviour defined",
+              "Wildcard TLS certificate management required for *.educore.io — adds certificate rotation complexity",
+              "APIM policy complexity grows as tenant routing rules accumulate — requires disciplined policy management"
             ]
           }
         ],
-        "oneLineSummary": "Tenant identity must be resolved at the network edge from a trusted signal — subdomain routing — never from client-supplied headers or request bodies."
+        "oneLineSummary": "Tenant identity must be resolved at the network edge from the subdomain — a signal the client cannot forge — never from client-supplied headers or request bodies."
       }
     },
     {
       "stepNumber": 3,
-      "interviewerSays": "Last one. Acme Corp violates their contract — you need to suspend their tenant immediately. Their data is cached in Redis. Walk me through your cache invalidation strategy.",
-      "context": "This tests operational thinking. Suspension must be instant, complete, and verifiable. Many engineers only think about the database — the cache is where suspended tenants continue to get service.",
+      "interviewerSays": "Acme Corp violates their contract. You need to suspend their tenant immediately. Their data is cached across Redis. Walk me through the exact suspension workflow — what you do, in what order, and why the sequence matters.",
+      "context": "This tests operational thinking and cache invalidation design. Suspension must be instant, complete, and verifiable. Many engineers only think about the database — the cache is where suspended tenants continue to receive service for the full TTL of every cached key.",
       "type": "single-choice",
       "options": [
         {
           "id": "A",
-          "text": "Set a suspended flag in the database. On next cache miss, the application will read the flag and block the request.",
+          "text": "Set a suspended flag in the database. On the next cache miss the application will read the flag and block the request — the suspension propagates naturally as cached entries expire",
           "score": 3,
-          "tag": "Too Slow",
+          "tag": "Gap Window — Too Slow",
           "tagColor": "orange",
-          "interviewerReaction": "What about the existing cached entries? A suspended tenant could continue to receive service for the full TTL of every cached key — potentially hours. How do you close that gap?"
+          "interviewerReaction": "The gap window here is the full TTL of every cached key — which in EduCore could be 15 minutes to several hours depending on what is cached. A suspended tenant continues to receive full service for that entire window. During a legal dispute or a security incident, that window is both a liability and potentially a GDPR breach. How do you make suspension instantaneous rather than eventual?"
         },
         {
           "id": "B",
-          "text": "Flush the entire Redis instance to clear all cached data for the suspended tenant.",
+          "text": "Flush the entire Redis instance to clear Acme's cached data immediately",
           "score": 1,
-          "tag": "Incorrect",
+          "tag": "Wrong — Platform-Wide Blast Radius",
           "tagColor": "orange",
-          "interviewerReaction": "That would evict all other tenants' cached data too — you'd cause a cache stampede across your entire platform. You need a targeted approach."
+          "interviewerReaction": "Flushing the entire Redis instance evicts cached data for all 140 tenants simultaneously. Every tenant's next requests become cache misses hitting the database at the same time — a cache stampede. You have punished every tenant on the platform to suspend one. The suspension needs to be surgical. How do you evict only Acme's keys without touching any other tenant's data?"
         },
         {
           "id": "C",
-          "text": "Use a Redis key namespace per tenant (tenant:{id}:*), issue a SCAN + DELETE pipeline for that namespace, push a suspension event to a pub/sub channel, and update the tenant registry to return 403 at the gateway — all as an atomic suspension workflow.",
+          "text": "In strict order: update the tenant registry to return 403 for Acme at the gateway — stopping new requests immediately; then run a Redis SCAN and DELETE pipeline targeting only the tenant:acme:* namespace to evict their cached data; then update the database status to SUSPENDED; then publish a tenant.suspended event to all pods via Redis Pub/Sub to invalidate any local in-memory caches; then write an audit log entry with timestamp, actor, and reason",
           "score": 10,
           "tag": "Excellent",
           "tagColor": "green",
-          "interviewerReaction": "Exactly right. Immediate gateway block plus targeted cache eviction plus event propagation. That is a production-grade suspension workflow."
+          "interviewerReaction": "Exactly right — and the sequence is critical. Gateway block first stops new requests before you touch anything else. Targeted cache eviction without touching other tenants. Database update persists the state. Pub/Sub propagation catches any in-memory caches on individual pods that Redis does not directly reach. Audit trail closes the loop for GDPR Article 30. This is a production-grade suspension workflow. Let's talk about provisioning the other side of this — how does a new tenant like Müller get onboarded?"
         }
       ],
       "idealAnswer": {
-        "summary": "Tenant suspension must be immediate and operate at three layers simultaneously: gateway (stop new requests), cache (evict existing data), and database (persist suspended state). Missing any layer creates a gap window.",
+        "summary": "Tenant suspension must operate at three layers simultaneously and in the correct sequence: gateway block first to stop new requests, targeted cache eviction second to close the gap window, database update third to persist state. Missing any layer or getting the sequence wrong creates a window where a suspended tenant continues to receive service.",
         "sections": [
           {
             "type": "text",
-            "heading": "The Three-Layer Suspension Model",
-            "content": "A correct suspension workflow operates at three layers simultaneously:\n\n1. Gateway Layer — Update the tenant registry to return HTTP 403 for this tenant's subdomain. This stops new requests immediately without touching any backend systems.\n\n2. Cache Layer — Evict all Redis keys for this tenant's namespace using a targeted SCAN + DEL pipeline. This prevents serving cached data to the suspended tenant.\n\n3. Persistence Layer — Mark the tenant as suspended in the database. This provides the authoritative state that survives pod restarts and cache eviction."
+            "heading": "Why Sequence Matters in Suspension",
+            "content": "Suspension is a three-layer problem and the order of operations matters:\n\n1. Gateway first — updating the tenant registry at the gateway stops all new requests before any other system is touched. This is the fastest enforcement point — milliseconds, no cache or database involvement.\n\n2. Cache second — evicting Redis keys for the tenant's namespace closes the gap window. Without this, cached responses continue serving the suspended tenant for the full TTL of every key.\n\n3. Database third — persisting the suspended status is the authoritative record that survives pod restarts, cache eviction, and gateway restarts. This is the truth the system falls back to.\n\n4. Pub/Sub — pods may hold in-memory caches (local Dictionary or IMemoryCache) that Redis does not reach directly. A pub/sub event tells every pod to invalidate their local cache for this tenant."
           },
           {
             "type": "architecture-block",
-            "heading": "Suspension Workflow",
-            "content": "  Admin triggers: POST /admin/tenants/acme/suspend\n                        │\n              ┌─────────┴──────────┐\n              │  Suspension        │\n              │  Orchestrator      │\n              └──┬──────┬──────┬───┘\n                 │      │      │\n        ┌────────┘   ┌──┘   ┌──┘\n        ▼            ▼      ▼\n  ┌──────────┐ ┌──────────┐ ┌──────────────┐\n  │ Tenant   │ │  Redis   │ │  Database    │\n  │ Registry │ │  Evict   │ │  suspended=  │\n  │ → 403    │ │ tenant:  │ │  true        │\n  │          │ │ acme:*   │ │              │\n  └──────────┘ └──────────┘ └──────────────┘\n        │            │\n        └────────────┘\n               │\n               ▼\n     Pub/Sub: tenant.suspended\n        (notify all pods)"
+            "heading": "Suspension Workflow — Exact Sequence",
+            "content": "  Admin: POST /admin/tenants/acme/suspend\n  { reason: 'CONTRACT_VIOLATION',\n    actorId: 'admin-007' }\n                    │\n                    ▼\n  ┌────────────────────────────────────────┐\n  │  Suspension Orchestrator               │\n  └──┬─────────┬──────────┬───────────────┘\n     │         │          │\n     ▼         ▼          ▼\n  ACTION 1  ACTION 2   ACTION 3\n  ────────  ────────   ────────\n  Tenant    Redis      Database\n  Registry  SCAN+DEL   UPDATE\n  → status  tenant:    tenants SET\n    = 403   acme:*     status =\n  → APIM    (targeted, SUSPENDED\n    blocks  not flush) suspendedAt\n  new reqs  other      = UTC_NOW\n  instantly tenants\n            unaffected\n     │\n     ▼\n  ACTION 4\n  ────────\n  Redis Pub/Sub\n  Channel: tenant.lifecycle\n  Event: { type: SUSPENDED,\n           tenantId: acme,\n           timestamp: ... }\n  → All pods receive event\n  → Each pod clears local\n    IMemoryCache for acme\n     │\n     ▼\n  ACTION 5\n  ────────\n  Audit Log (Application Insights)\n  {\n    event: TenantSuspended,\n    tenantId: acme,\n    reason: CONTRACT_VIOLATION,\n    actorId: admin-007,\n    registryUpdatedAt: T+0ms,\n    cacheEvictedAt: T+120ms,\n    dbUpdatedAt: T+145ms,\n    pubSubFiredAt: T+150ms\n  }\n  ← Required for GDPR Article 30\n    records of processing"
           },
           {
             "type": "key-principles",
             "heading": "Key Principles",
             "items": [
-              "Always prefix Redis keys with tenant namespace: tenant:{tenantId}:{resource} — enables targeted eviction without touching other tenants",
-              "Use Redis SCAN + DEL pipeline, never KEYS command in production — KEYS blocks the Redis thread for the full scan duration",
-              "Pub/Sub event (tenant.suspended) ensures all pods in the Geo-Pod invalidate their local in-memory caches simultaneously",
-              "The gateway 403 is the fastest enforcement point — it activates in milliseconds without cache or DB involvement",
-              "Log the suspension event with a timestamp to the audit trail — required for GDPR Article 30 records of processing"
+              "Always prefix Redis keys with tenant namespace — tenant:{tenantId}:{resource} — this makes targeted eviction possible without affecting other tenants",
+              "Use Redis SCAN + DEL pipeline, never the KEYS command — KEYS blocks the Redis thread for the full scan duration and is dangerous in production",
+              "Pub/Sub event propagation handles local in-memory caches on individual pods that Redis cannot reach directly",
+              "Gateway block is the fastest enforcement — it activates in milliseconds and requires no cache or database round trip",
+              "The audit log entry must record timestamps for each action — not just that suspension happened but when each layer was enforced. This is the evidence trail for legal and compliance purposes"
             ]
           },
           {
             "type": "warning",
             "heading": "The Gap Window Anti-Pattern",
-            "content": "The most dangerous suspension anti-pattern is updating only the database. If you set suspended=true in the DB but leave cached data in Redis, the suspended tenant continues to receive cached API responses for the full TTL of every key — which could be 15 minutes to several hours depending on your cache policy. During an incident or legal dispute, this gap window is both a security failure and a potential GDPR breach."
+            "content": "The most dangerous suspension anti-pattern is updating only the database and relying on cache TTL expiry to propagate the suspension. If your Redis TTL is 30 minutes, a suspended tenant continues receiving full API responses for up to 30 minutes after suspension is triggered. During a legal dispute or security incident, this gap window constitutes a failure of the suspension mechanism and potentially a GDPR breach if the tenant's data continued to be accessible.\n\nGateway block + immediate cache eviction eliminates this window. The suspension is effective in under 200 milliseconds regardless of cache TTL."
           },
           {
             "type": "tradeoffs",
             "heading": "Trade-offs",
             "pros": [
-              "Gateway block is instantaneous — no cache TTL gap window",
-              "Targeted Redis namespace eviction has no collateral impact on other tenants",
-              "Pub/Sub propagation ensures all pods sync state simultaneously",
-              "Audit trail satisfies GDPR Article 30 records of processing requirements"
+              "Gateway block is instantaneous — no TTL gap window between suspension trigger and enforcement",
+              "Targeted Redis namespace eviction has zero collateral impact on other tenants",
+              "Pub/Sub propagation ensures all pods sync state even if they hold local in-memory caches",
+              "Timestamped audit trail satisfies GDPR Article 30 records of processing requirements"
             ],
             "cons": [
-              "SCAN + DEL pipeline has cost proportional to the number of cached keys — acceptable for suspension but design key namespaces to bound this",
-              "Pub/Sub delivery is at-most-once — pods that are down during the event may miss it; resolve with a startup check against the tenant registry",
-              "Orchestrating three systems atomically requires careful error handling — use a saga pattern with compensation actions if any step fails"
+              "SCAN + DEL pipeline cost is proportional to the number of cached keys — design key namespaces to bound this",
+              "Pub/Sub delivery is at-most-once — pods that are down during the event may miss it. Mitigate with a startup check against the tenant registry on pod initialisation",
+              "Orchestrating four systems requires careful error handling — use compensating actions if any step fails, and ensure idempotency so the workflow can be safely retried"
             ]
           }
         ],
-        "oneLineSummary": "Tenant suspension is a three-layer workflow — gateway block, targeted cache eviction, and DB persistence — and missing any one layer creates a gap window that is both a security failure and a GDPR risk."
+        "oneLineSummary": "Tenant suspension is a four-layer workflow — gateway block, targeted cache eviction, database persistence, pub/sub propagation — and the sequence is not optional."
+      }
+    },
+    {
+      "stepNumber": 4,
+      "interviewerSays": "Müller signs the contract. Their Geo-Pod in Germany North needs to be provisioned — AKS namespace, dedicated SQL database, Redis cache, Blob Storage container, DNS subdomain, TLS certificate, tenant registry entry. Your current process is manual — a senior engineer spends two days clicking through the Azure portal. What is wrong with that, and how do you redesign the provisioning process?",
+      "context": "This tests operational maturity and Infrastructure-as-Code thinking at the 5-10 year level. Manual provisioning does not scale, is error-prone, and creates configuration drift between tenants. The right answer introduces IaC, automated pipelines, and idempotent provisioning — with specific attention to what can go wrong mid-provisioning.",
+      "type": "single-choice",
+      "options": [
+        {
+          "id": "A",
+          "text": "Create a detailed runbook — a step-by-step checklist of every Azure portal action required to provision a new Geo-Pod tenant. The senior engineer follows the runbook exactly, checking off each step. This reduces errors without requiring any code changes.",
+          "score": 3,
+          "tag": "Better but Still Manual",
+          "tagColor": "yellow",
+          "interviewerReaction": "A runbook reduces errors compared to undocumented manual work — it is better than nothing. But it still takes two days, still depends on a human executing it correctly, still cannot be tested in a staging environment before running in production, and still cannot be rolled back if something goes wrong halfway through. If EduCore signs ten Geo-Pod tenants this quarter, that is twenty engineer-days spent clicking through the Azure portal. What makes provisioning fast, repeatable, and testable without manual intervention?"
+        },
+        {
+          "id": "B",
+          "text": "Define the entire Geo-Pod infrastructure as Bicep or Terraform templates — parameterised by tenantId and region. A CI/CD pipeline accepts a new tenant onboarding request, runs the IaC template, registers the tenant in the registry, provisions the DNS subdomain and TLS certificate via Azure DNS and Key Vault, seeds the database schema, and marks the tenant ACTIVE — all without manual steps. The pipeline is idempotent so it can be safely rerun if it fails midway.",
+          "score": 10,
+          "tag": "Excellent",
+          "tagColor": "green",
+          "interviewerReaction": "Exactly right — IaC templates parameterised by tenant, automated pipeline, idempotent execution. The idempotency point is critical — a provisioning pipeline that fails halfway through and cannot be safely rerun will leave tenants in a broken partial state. What specific failure modes does idempotency protect against in this pipeline?"
+        },
+        {
+          "id": "C",
+          "text": "Write a script in PowerShell or Bash that calls the Azure CLI to create each resource in sequence — AKS namespace, SQL database, Redis, Blob Storage. Run the script manually for each new tenant. This is faster than portal clicks and produces consistent results.",
+          "score": 5,
+          "tag": "Improvement, Not Full Solution",
+          "tagColor": "yellow",
+          "interviewerReaction": "A script is faster than portal clicks and more consistent than a runbook — genuine improvement. But it is still manually triggered, has no rollback mechanism if it fails midway, stores no record of what was provisioned or when, and cannot be tested against a staging environment before running in production. It is also imperative — it tells Azure what to do step by step — rather than declarative, which describes the desired end state and lets Azure figure out how to get there. What is the difference between imperative scripts and declarative IaC, and why does it matter here?"
+        }
+      ],
+      "idealAnswer": {
+        "summary": "Manual tenant provisioning is an operational bottleneck that does not scale beyond a handful of tenants. The correct approach is fully automated, idempotent Infrastructure-as-Code — parameterised templates executed by a CI/CD pipeline that handles DNS, TLS, database schema, and tenant registry in a single repeatable workflow.",
+        "sections": [
+          {
+            "type": "text",
+            "heading": "Why Manual Provisioning Fails at Scale",
+            "content": "Manual provisioning has four compounding failure modes:\n\n1. Human error — clicking through the Azure portal, a senior engineer misses one configuration option. The tenant's Redis cache is provisioned in West Europe instead of Germany North. GDPR violation. The error may not be caught for weeks.\n\n2. Configuration drift — tenant 1 is provisioned with one set of settings. Tenant 15 is provisioned six months later with slightly different settings because the process evolved informally. No two tenants are identical. Debugging becomes impossible.\n\n3. No rollback — the provisioning fails halfway through. AKS namespace exists, SQL database does not. The engineer must manually clean up the partial state before retrying. Every partial failure is an ad hoc recovery operation.\n\n4. Does not scale — two engineer-days per tenant. Ten new Geo-Pod tenants per quarter is twenty engineer-days per quarter spent on mechanical work that adds no product value."
+          },
+          {
+            "type": "architecture-block",
+            "heading": "Automated Tenant Onboarding Pipeline",
+            "content": "  Sales confirms: Müller signs contract\n  CRM webhook → Onboarding Service\n  Payload: { tenantId: muller,\n             region: germany-north,\n             tier: geo-pod-gdpr,\n             contactEmail: it@muller.de }\n                    │\n                    ▼\n  ┌────────────────────────────────────────┐\n  │  Onboarding Service                    │\n  │  → Validate request                    │\n  │  → Create onboarding record in DB:     │\n  │    { status: PROVISIONING,             │\n  │      startedAt: UTC_NOW }              │\n  │  → Trigger CI/CD pipeline             │\n  └────────────────┬───────────────────────┘\n                   │\n                   ▼\n  ┌────────────────────────────────────────┐\n  │  CI/CD Pipeline (GitHub Actions /      │\n  │  Azure DevOps)                         │\n  │                                        │\n  │  STEP 1: Run Bicep template            │\n  │  Parameters: tenantId=muller,          │\n  │              region=germany-north      │\n  │  Resources created (idempotent):       │\n  │  → AKS namespace: muller-ns           │\n  │  → Azure SQL DB: muller-db            │\n  │  → Redis Cache: muller-cache          │\n  │  → Blob Container: muller-docs        │\n  │  → Key Vault secrets for conn strings  │\n  │                                        │\n  │  STEP 2: DNS + TLS                     │\n  │  → Azure DNS: muller.educore.io        │\n  │  → Certificate: Key Vault auto-cert   │\n  │                                        │\n  │  STEP 3: Database schema migration     │\n  │  → Run EF Core migrations against      │\n  │    muller-db (idempotent migrations)   │\n  │                                        │\n  │  STEP 4: Register tenant               │\n  │  → INSERT INTO tenant_registry:        │\n  │    { tenantId: muller,                 │\n  │      podEndpoint: muller-pod.internal, │\n  │      region: germany-north,            │\n  │      status: ACTIVE }                  │\n  │                                        │\n  │  STEP 5: Send welcome email            │\n  │  → Notify it@muller.de                 │\n  │  → Update onboarding record:           │\n  │    { status: COMPLETE }                │\n  └────────────────────────────────────────┘\n\n  IDEMPOTENCY:\n  Bicep: if resource exists with same config\n         → no-op, not error\n  DB migration: if migration already applied\n         → skip, not rerun\n  Registry insert: INSERT IF NOT EXISTS\n  → Pipeline can be safely rerun at any\n    point after any failure"
+          },
+          {
+            "type": "key-principles",
+            "heading": "Key Principles",
+            "items": [
+              "IaC templates must be parameterised by tenantId and region — one template provisions any tenant in any region. No tenant-specific code",
+              "Every pipeline step must be idempotent — if the pipeline fails at step 3 and is rerun, steps 1 and 2 must not fail because resources already exist",
+              "The tenant registry must only be updated as the final step — a tenant marked ACTIVE must have all infrastructure fully ready. Premature activation sends real traffic to incomplete infrastructure",
+              "Database schema migrations must be tenant-scoped and idempotent — running the same migration twice must be a no-op, not a failure",
+              "Every provisioning event must be logged with timestamps — when each resource was created, which pipeline run created it, and who triggered the onboarding"
+            ]
+          },
+          {
+            "type": "warning",
+            "heading": "The Partial Provision Trap",
+            "content": "The most dangerous failure mode in tenant provisioning is partial completion — the pipeline creates the AKS namespace and the SQL database, then fails before creating the Redis cache. Without idempotency, re-running the pipeline tries to create the AKS namespace again and fails because it already exists — preventing recovery.\n\nWith idempotency, re-running from any point is safe. Existing resources are detected and skipped. Missing resources are created. The pipeline converges to the desired state regardless of how many times it has partially run. This is the core property that makes automated provisioning operationally safe."
+          },
+          {
+            "type": "tradeoffs",
+            "heading": "Trade-offs",
+            "pros": [
+              "Provisioning time drops from two engineer-days to under 20 minutes — no human in the loop after the contract is signed",
+              "Every tenant is provisioned identically — no configuration drift, no missed settings, no region mistakes",
+              "Idempotent pipeline means any failure is safely recoverable by rerunning — no manual cleanup of partial state",
+              "IaC templates can be tested against a staging environment before running in production — catch region misconfigurations before they cause a GDPR breach"
+            ],
+            "cons": [
+              "IaC templates require upfront investment and ongoing maintenance as infrastructure evolves",
+              "Pipeline failures mid-provisioning leave partial infrastructure that incurs cost — monitoring for orphaned resources is necessary",
+              "Tenant registry activation as the final step means any pipeline failure leaves the tenant unable to access the platform — requires a retry mechanism and customer-facing status communication"
+            ]
+          }
+        ],
+        "oneLineSummary": "Manual tenant provisioning does not scale — idempotent IaC templates executed by a CI/CD pipeline provision any tenant in any region in under 20 minutes with zero configuration drift."
+      }
+    },
+    {
+      "stepNumber": 5,
+      "interviewerSays": "Your security team has received a report. In EduCore's shared Redis cache — used by non-Geo-Pod tenants on the Pool Model — a cache key for one tenant was accidentally returned to a different tenant's request. The bug has been fixed in code. But you need to explain why it happened, how you would detect this class of problem automatically going forward, and what architectural changes prevent it from recurring.",
+      "context": "This is a cross-tenant data leakage scenario — the most serious class of bug in a multi-tenant system. It tests whether the engineer thinks in layers: the code bug is the immediate cause, but the architecture allowed it to happen. The right answer addresses detection, incident response, and structural prevention — not just the code fix.",
+      "type": "single-choice",
+      "options": [
+        {
+          "id": "A",
+          "text": "The fix is a code review process — require two engineers to review any code that touches Redis keys to ensure tenant namespacing is always correct. Add Redis key naming to the engineering onboarding guide.",
+          "score": 3,
+          "tag": "Process Over Architecture",
+          "tagColor": "yellow",
+          "interviewerReaction": "Code review and documentation reduce the probability of the same mistake — they are worth doing. But they are process controls, not architectural controls. A tired engineer at 11pm still writes the wrong key. A new engineer joins and misses the onboarding guide. The architecture must make cross-tenant access structurally impossible — not just discouraged. What change to the architecture removes the possibility of this class of bug rather than just making it less likely?"
+        },
+        {
+          "id": "B",
+          "text": "The root cause is that the architecture allowed application code to construct Redis keys directly — a developer omitted the tenant namespace prefix on one key and the bug was possible. The fix is a TenantCache abstraction layer: a wrapper around Redis that accepts tenantId as a mandatory parameter and constructs all keys internally as tenant:{tenantId}:{resource}. Application code can never touch a raw Redis key. Additionally, add Application Insights query alerts that detect cache key patterns without a tenant prefix, and run a one-time audit of all existing Redis keys to find any other mis-namespaced entries.",
+          "score": 10,
+          "tag": "Excellent",
+          "tagColor": "green",
+          "interviewerReaction": "Exactly right. The abstraction layer is the architectural fix — it makes the correct behaviour the only behaviour. A developer using TenantCache cannot accidentally omit the tenant prefix because the method signature requires tenantId. The Application Insights alert means future misconfigurations are detected automatically rather than by a security report. The one-time audit closes the historical exposure window. What would you tell Müller Industrietechnik when they ask whether their Geo-Pod was affected by this incident?"
+        },
+        {
+          "id": "C",
+          "text": "Flush all Redis keys across the platform and repopulate from the database — this eliminates any incorrectly namespaced keys immediately and gives you a clean slate to work from",
+          "score": 2,
+          "tag": "Destroys All Tenants' Cache",
+          "tagColor": "orange",
+          "interviewerReaction": "Flushing the entire Redis instance causes a cache stampede across all 140 tenants simultaneously — every request becomes a cache miss hitting the database at the same time. You have caused a platform-wide incident to remediate a bug that affected a subset of keys. The remediation must be surgical. And flushing the cache does not prevent the same bug from recurring — new keys written after the flush will still be mis-namespaced if the code has not been fixed correctly. What is the targeted remediation that does not impact other tenants?"
+        }
+      ],
+      "idealAnswer": {
+        "summary": "Cross-tenant cache leakage has three response layers: immediate remediation of the affected keys, architectural prevention through an abstraction layer that makes correct namespacing the only option, and detection through automated monitoring that catches future violations before a security report does.",
+        "sections": [
+          {
+            "type": "text",
+            "heading": "Why This Bug Is Possible and How Architecture Prevents It",
+            "content": "The root cause of cross-tenant cache leakage in EduCore is that application code constructs Redis keys directly:\n\n  await _redis.SetStringAsync($\"course:{courseId}\", data);\n\nOne developer, in one method, forgot the tenant prefix. The key was course:c-101 instead of tenant:acme:course:c-101. A subsequent request from a different tenant queried the same key and received Acme's cached course data.\n\nThe code fix corrects that one instance. The architectural fix makes the entire class of bug impossible. If no application code can construct a raw Redis key — if the only way to write to or read from Redis is through a wrapper that requires tenantId as a mandatory parameter — then the bug cannot happen regardless of whether a developer remembers the convention."
+          },
+          {
+            "type": "architecture-block",
+            "heading": "TenantCache Abstraction + Detection",
+            "content": "  BEFORE (vulnerable):\n  ─────────────────────────────────────────\n  // Developer forgets tenant prefix\n  await _redis.SetAsync(\n    $\"course:{courseId}\",   ← no tenant prefix\n    data, TimeSpan.FromMinutes(30));\n\n  await _redis.GetAsync(\n    $\"course:{courseId}\");  ← reads any tenant's data\n\n  AFTER (abstraction layer):\n  ─────────────────────────────────────────\n  // TenantCache — the only Redis interface\n  // available to application code\n  public class TenantCache\n  {\n    public Task SetAsync(\n      string tenantId,      ← required, cannot omit\n      string resource,\n      object value,\n      TimeSpan ttl)\n    {\n      var key = $\"tenant:{tenantId}:{resource}\";\n      return _redis.SetAsync(key, value, ttl);\n    }\n\n    public Task<T> GetAsync<T>(\n      string tenantId,      ← required\n      string resource)\n    {\n      var key = $\"tenant:{tenantId}:{resource}\";\n      return _redis.GetAsync<T>(key);\n    }\n  }\n\n  // Application code — cannot construct raw keys\n  await _tenantCache.SetAsync(\n    tenantId, $\"course:{courseId}\", data, ttl);\n\n  DETECTION (Application Insights):\n  ─────────────────────────────────────────\n  // Custom metric on every Redis operation\n  // Alert if key does not start with tenant:\n  Kusto query (runs every 5 minutes):\n  customMetrics\n  | where name == \"RedisKeyWrite\"\n  | where tostring(customDimensions.key)\n      !startswith \"tenant:\"\n  | project timestamp, key, tenantId, operation\n  → Alert: fire PagerDuty immediately\n\n  IMMEDIATE REMEDIATION:\n  ─────────────────────────────────────────\n  // One-time audit — find all mis-namespaced keys\n  SCAN pattern: *  (all keys)\n  Filter: keys NOT matching tenant:*\n  Action: DELETE each mis-namespaced key\n  Log: { key, deletedAt, auditRunId }\n\n  // Notify affected tenants\n  // Identify which tenants' data was in\n  // mis-namespaced keys and log exposure window"
+          },
+          {
+            "type": "key-principles",
+            "heading": "Key Principles",
+            "items": [
+              "Architectural controls are stronger than process controls — an abstraction layer that makes the bug structurally impossible is more reliable than a code review checklist that depends on human vigilance",
+              "The TenantCache abstraction must be the only permitted path to Redis — raw IConnectionMultiplexer or IDatabase should not be injectable in application code. Enforce via dependency injection registration",
+              "Automated detection must not rely on a security report — Application Insights alerts on non-namespaced key writes catch violations before they become incidents",
+              "The one-time key audit must be targeted — SCAN for keys not matching the tenant: pattern, not a full flush. Surgical remediation without impacting other tenants",
+              "Affected tenants must be notified — GDPR Article 33 requires notification of a data breach within 72 hours. Even a brief cache exposure of another tenant's data may trigger this obligation"
+            ]
+          },
+          {
+            "type": "warning",
+            "heading": "GDPR Article 33 — The 72-Hour Clock",
+            "content": "A cross-tenant cache exposure is a personal data breach under GDPR. The moment your security team confirmed that one tenant's data was served to another tenant, the 72-hour notification clock started.\n\nGDPR Article 33 requires notifying the relevant supervisory authority within 72 hours of becoming aware of a breach. If the affected data belonged to EU citizens — which it does in EduCore — this is not optional.\n\nFor EduCore, this means the security team's response to the incident report must immediately escalate to the Data Protection Officer, who logs the breach, assesses the scope, and triggers the notification process if required. The technical remediation and the compliance response run in parallel — one does not wait for the other."
+          },
+          {
+            "type": "tradeoffs",
+            "heading": "Trade-offs",
+            "pros": [
+              "Abstraction layer makes cross-tenant cache access structurally impossible — the correct behaviour is the only behaviour available to developers",
+              "Automated detection via Application Insights catches violations in minutes rather than waiting for a security report",
+              "Surgical key audit remediates the historical exposure without impacting any other tenant's cached data"
+            ],
+            "cons": [
+              "Abstracting Redis behind TenantCache removes direct access to Redis features — advanced Redis operations (Lua scripts, sorted sets, pub/sub) must be explicitly exposed through the abstraction as needed",
+              "Retrofitting the abstraction layer onto existing code requires auditing every Redis call in the codebase — a non-trivial investment for a large service",
+              "Automated detection via key pattern matching requires all Redis writes to emit a custom metric — adds minor overhead to every cache write operation"
+            ]
+          }
+        ],
+        "oneLineSummary": "Cross-tenant cache leakage is prevented architecturally — a TenantCache abstraction that requires tenantId makes correct namespacing the only option, and automated detection via Application Insights catches violations before a security report does."
       }
     }
   ],
   "scoreCard": {
-    "maxScore": 30,
+    "maxScore": 50,
     "bands": [
       {
-        "min": 27,
-        "max": 30,
-        "label": "Ready for this SA role",
+        "min": 43,
+        "max": 50,
+        "label": "Principal Architect Ready",
         "color": "green",
-        "message": "Strong architectural thinking across all dimensions. You demonstrated both breadth and depth — GDPR awareness, security thinking at the routing layer, and operational precision under suspension scenarios."
+        "message": "Strong architectural thinking across all five dimensions — GDPR compliance, routing security, operational precision, infrastructure automation, and defence-in-depth against data leakage. You demonstrated both breadth and depth, and you thought in layers throughout."
       },
       {
-        "min": 18,
-        "max": 26,
-        "label": "Strong but gaps exist",
+        "min": 28,
+        "max": 42,
+        "label": "Strong Foundation, Gaps to Address",
         "color": "yellow",
-        "message": "Good fundamentals. Deepen your understanding of compliance architecture, gateway-level security patterns, and operational cache management before your next senior interview."
+        "message": "Good fundamentals with gaps in one or more areas. Deepen your understanding of compliance architecture, gateway-level security patterns, IaC provisioning design, and architectural controls over process controls. These are the topics that differentiate senior from principal-level thinking."
       },
       {
         "min": 0,
-        "max": 17,
-        "label": "Needs deeper preparation",
+        "max": 27,
+        "label": "Needs Deeper Preparation",
         "color": "red",
-        "message": "Revisit multi-tenancy fundamentals, GDPR architecture requirements, and distributed systems operational patterns. Focus on thinking in layers — network, cache, compute, storage, and logging."
+        "message": "Revisit multi-tenancy fundamentals, GDPR architecture requirements, and distributed systems operational patterns. Focus on thinking in layers — network, cache, compute, storage, and logging — and on the difference between process controls and architectural controls."
       }
     ]
   },
@@ -310,6 +471,11 @@
           "label": "GDPR Article 30 — Records of processing activities",
           "url": "https://gdpr-info.eu/art-30-gdpr/",
           "source": "gdpr-info.eu"
+        },
+        {
+          "label": "GDPR Article 33 — Notification of a personal data breach",
+          "url": "https://gdpr-info.eu/art-33-gdpr/",
+          "source": "gdpr-info.eu"
         }
       ]
     },
@@ -324,6 +490,11 @@
         {
           "label": "Azure Cache for Redis documentation",
           "url": "https://learn.microsoft.com/en-us/azure/azure-cache-for-redis/cache-overview",
+          "source": "Microsoft Learn"
+        },
+        {
+          "label": "Bicep documentation — Infrastructure as Code",
+          "url": "https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/overview",
           "source": "Microsoft Learn"
         }
       ]
@@ -385,13 +556,13 @@
       },
       {
         "type": "text",
-        "heading": "Redis - Explained Simply",
-        "content": "Every application has the same problem. The database is slow. Not broken, not misconfigured — just slow. Because databases are built for permanence. They write data to disk, they maintain indexes, they enforce constraints, they guarantee that nothing is ever lost. All of that reliability comes at a cost. Speed.\n\nNow imagine your application gets a thousand requests every second. Each request asks the same question — who is this user, what are their permissions, what is their account status. A thousand database queries every second for information that has not changed since yesterday. The database is doing enormous work to answer questions it has already answered a thousand times before.\n\nRedis solves this. Redis is a store that lives entirely in memory — not on disk, in RAM. And RAM is orders of magnitude faster than disk. A database query that takes fifty milliseconds takes less than one millisecond in Redis. That difference, multiplied across thousands of requests, is what separates a fast application from a slow one.\n\nThe way it works is simple. The first time your application needs a piece of data it goes to the database, gets the answer, and stores a copy in Redis. Every subsequent request for the same data skips the database entirely and reads from Redis instead. This is called a cache. Redis is the most widely used cache in the world.\n\nBut Redis is not just a cache. It is a data structure store. It understands lists, sets, sorted sets, and hash maps natively. This makes it useful for things a simple cache cannot do — counting how many times a user has logged in this hour, maintaining a leaderboard that updates in real time, storing a user session with dozens of attributes, or broadcasting a message to thousands of connected clients simultaneously.\n\nThe one thing Redis trades away for all this speed is permanence. Because data lives in memory, a server restart means that data is gone. This is why Redis is never your primary database — it is always a layer in front of your real database. The database holds the truth. Redis holds a fast copy of the truth that is good enough for right now.\n\nIn a multi-tenant system Redis becomes even more critical. Instead of hitting the database on every request to figure out which tenant this subdomain belongs to, which region their data lives in, and whether their account is active — you cache all of that in Redis. A lookup that would cost fifty milliseconds and a database round trip costs less than a millisecond and never touches the database at all. At scale, that is the difference between an infrastructure bill that is manageable and one that is not."
+        "heading": "Redis — Explained Simply",
+        "content": "Every application has the same problem. The database is slow. Not broken, not misconfigured — just slow. Because databases are built for permanence. They write data to disk, they maintain indexes, they enforce constraints, they guarantee that nothing is ever lost. All of that reliability comes at a cost. Speed.\n\nNow imagine your application gets a thousand requests every second. Each request asks the same question — who is this user, what are their permissions, what is their account status. A thousand database queries every second for information that has not changed since yesterday. The database is doing enormous work to answer questions it has already answered a thousand times before.\n\nRedis solves this. Redis is a store that lives entirely in memory — not on disk, in RAM. And RAM is orders of magnitude faster than disk. A database query that takes fifty milliseconds takes less than one millisecond in Redis. That difference, multiplied across thousands of requests, is what separates a fast application from a slow one.\n\nThe way it works is simple. The first time your application needs a piece of data it goes to the database, gets the answer, and stores a copy in Redis. Every subsequent request for the same data skips the database entirely and reads from Redis instead. This is called a cache. Redis is the most widely used cache in the world.\n\nBut Redis is not just a cache. It is a data structure store. It understands lists, sets, sorted sets, and hash maps natively. This makes it useful for things a simple cache cannot do — counting how many times a user has logged in this hour, maintaining a leaderboard that updates in real time, storing a user session with dozens of attributes, or broadcasting a message to thousands of connected clients simultaneously.\n\nThe one thing Redis trades away for all this speed is permanence. Because data lives in memory, a server restart means that data is gone. This is why Redis is never your primary database — it is always a layer in front of your real database. The database holds the truth. Redis holds a fast copy of the truth that is good enough for right now.\n\nIn a multi-tenant system Redis becomes even more critical — and even more dangerous. Instead of hitting the database on every request to figure out which tenant this subdomain belongs to, you cache that in Redis. Fast, efficient, scalable. But if your Redis keys are not correctly namespaced per tenant, one tenant's cached data becomes visible to another. The same tool that makes your platform fast is the tool that causes your worst data breach. The architecture must make correct namespacing structurally enforced — not just a convention that developers are expected to remember."
       },
       {
         "type": "text",
-        "heading": "JWT tokens - Explained Simply",
-        "content": "Think about a boarding pass at an airport. You arrive at the check-in counter, show your passport, prove who you are. The airline verifies your identity once — and then hands you a boarding pass. From that moment, nobody asks for your passport again. Every gate you walk through, every lounge you enter, every time someone needs to know who you are — you just show the boarding pass. It has your name, your seat, your flight, your boarding group. Everything needed, right there in your hand. The gate agent does not call the airline database to verify you exist. They just scan the pass.\n\nJWT works exactly like this. You log in with your username and password. The server verifies your credentials once — checks the database, confirms you exist, confirms your password is correct — and then hands you a token. From that moment, the database is out of the picture entirely. Every request you make includes that token. The server reads it, sees your user ID, your role, your permissions — and that is enough. No database call. No lookup. No waiting. The token itself is the proof. One database hit at login. Zero database hits for everything after. In an application handling a million requests a day, that difference is not a minor optimisation — it is what keeps the database alive.\n\nThe obvious question is — what stops you from editing that token? Writing yourself a business class seat you did not pay for? This is where the clever part comes in. The airline prints a barcode on your boarding pass that is mathematically tied to everything on it. Change your seat number, the barcode scan fails. The gate agent knows instantly it has been tampered with.\n\nJWT does the same thing. When the server creates your token it signs it with a secret key that only the server knows. That signature is tied to every single piece of information inside the token. Change your user ID, change your role, change anything — the signature immediately becomes invalid. The server checks the signature on every single request. A tampered token is rejected before it gets anywhere near your data.\n\nNow here is the one weakness of this system. Because the server never stores your token — it just hands it to you and forgets it — the server cannot cancel a specific token if something goes wrong. If your account is suspended, if your role changes, if someone steals your token — the server has no way to reach into your pocket and tear up the boarding pass. The only defence is an expiry time. A token that expires in fifteen minutes stops working in fifteen minutes regardless of what happens. Short lived tokens limit the damage. This is the trade-off JWT makes — no database lookups on every request, but no instant revocation either.\n\nJWT did not become the standard because it is perfect. It became the standard because modern applications run across dozens of servers and services simultaneously. A session database that every server has to call on every request becomes a bottleneck and a single point of failure at scale. A JWT carries its own proof of identity. Every server, every service, every region can independently verify who you are in microseconds — with nothing but the secret key and the token itself."
+        "heading": "JWT Tokens — Explained Simply",
+        "content": "Think about a boarding pass at an airport. You arrive at the check-in counter, show your passport, prove who you are. The airline verifies your identity once — and then hands you a boarding pass. From that moment, nobody asks for your passport again. Every gate you walk through, every lounge you enter, every time someone needs to know who you are — you just show the boarding pass. It has your name, your seat, your flight, your boarding group. Everything needed, right there in your hand. The gate agent does not call the airline database to verify you exist. They just scan the pass.\n\nJWT works exactly like this. You log in with your username and password. The server verifies your credentials once — checks the database, confirms you exist, confirms your password is correct — and then hands you a token. From that moment, the database is out of the picture entirely. Every request you make includes that token. The server reads it, sees your user ID, your role, your permissions — and that is enough. No database call. No lookup. No waiting. The token itself is the proof.\n\nThe obvious question is — what stops you from editing that token? This is where the clever part comes in. When the server creates your token it signs it with a secret key that only the server knows. That signature is tied to every single piece of information inside the token. Change your user ID, change your role, change anything — the signature immediately becomes invalid. The server checks the signature on every single request. A tampered token is rejected before it gets anywhere near your data.\n\nIn a multi-tenant system, JWT tokens carry one more critical piece of information — the tenantId claim. When you log in to muller.educore.io, your token contains tenantId: muller. Every subsequent request carries that claim. The application validates it against the gateway-resolved tenant identity. If the claims do not match — if someone has manipulated the token or replayed it against a different tenant's subdomain — the request is rejected. The token becomes both an identity document and a tenant boundary enforcer."
       }
     ]
   }

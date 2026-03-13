@@ -6,11 +6,12 @@
   "sequence": 1,
   "estimatedMinutes": 6,
   "description": "You have been asked to build a user registration API. Sounds simple. But every decision you make — status codes, validation, password storage, response design, error handling, rate limiting — has a right way and a wrong way. Navigate the six decisions that every junior engineer gets wrong at least once.",
+  "overview": "A small SaaS product team is building a web platform and needs a user registration API. The requirement is straightforward: accept a user's name, email address, and password via a POST request, validate the input, store the user securely, and return an appropriate response.\n\nThe platform is built on ASP.NET Web API (.NET 8). User data is stored in Azure SQL. The registration endpoint is publicly accessible — no authentication required to call it.\n\nWhat sounds like a simple task involves six distinct decisions, each with a correct approach and a commonly wrong one. Status codes, input validation, password storage, response design, error handling, and abuse prevention — every one of these is a decision point where junior engineers routinely make choices that work perfectly in development and cause security incidents in production.\n\nYou are the engineer assigned to build this endpoint. Every question ahead is a decision you must make before you ship.",
   "tags": [ "REST API", "Security", "Validation", "Password Hashing", "Error Handling", "Rate Limiting" ],
 
   "interviewer": {
     "name": "Neha Joshi",
-    "role": "Senior Backend Engineer",
+    "role": "Senior Engineer",
     "avatar": "NJ"
   },
 

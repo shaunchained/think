@@ -6,11 +6,12 @@
   "sequence": 4,
   "estimatedMinutes": 5,
   "description": "A enterprise SaaS platform manages thousands of subscribers across trial, paid, downgrade, and cancellation states. Navigate the hardest architectural decisions in subscription lifecycle management — distributed transactions, data retention, and seamless reactivation.",
+  "overview": "A mid-size B2B SaaS platform manages thousands of subscribers across multiple plan tiers — Trial, Basic, and Premium. Businesses sign up, upgrade, downgrade, and cancel. Each lifecycle event touches multiple services: billing, subscription state, feature entitlements, user access, and notifications.\n\nThe platform is built on ASP.NET Web API (.NET 8), hosted on Azure App Service. The core services are: Billing Service — owns payment processing and invoice history; Subscription Service — owns plan state and lifecycle transitions; Feature Flag Service — owns entitlements and enforces plan limits on every API request; User Service — owns accounts, credentials, and permissions; and Notification Service — handles transactional emails and in-app alerts. Azure Service Bus connects these services asynchronously. Azure SQL is the primary data store. Application Insights provides telemetry across all services.",
   "tags": [ "Billing", "Saga Pattern", "Distributed Transactions", "Event-Driven", "Data Retention", "Azure Service Bus" ],
 
   "interviewer": {
     "name": "Priya Nair",
-    "role": "Principal Engineer, Enterprise SaaS",
+    "role": "Principal Engineer",
     "avatar": "PN"
   },
 
