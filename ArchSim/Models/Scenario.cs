@@ -8,6 +8,7 @@ public class Scenario
     public string Difficulty { get; set; } = "";
     public int EstimatedMinutes { get; set; }
     public string Description { get; set; } = "";
+    public string? Overview { get; set; }
     public int Sequence { get; set; }
     public List<string> Tags { get; set; } = new();
     public Interviewer Interviewer { get; set; } = new();

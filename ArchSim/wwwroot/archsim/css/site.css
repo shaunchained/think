@@ -299,6 +299,133 @@ body {
 }
 
 /* =====================================================
+   SCENARIO INTRO PAGE
+   ===================================================== */
+
+.intro-page {
+    min-height: calc(100vh - 57px);
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 3rem 1.5rem 4rem;
+}
+
+.intro-wrap {
+    width: 100%;
+    max-width: 680px;
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+}
+
+.intro-header {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.intro-category {
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--cyan);
+    font-family: var(--mono);
+}
+
+.intro-title {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: var(--white);
+    line-height: 1.25;
+}
+
+.intro-meta {
+    display: flex;
+    gap: 1.25rem;
+    margin-top: 0.25rem;
+}
+
+.intro-meta .meta-item {
+    font-size: 0.75rem;
+    color: var(--slate-500);
+    font-family: var(--mono);
+}
+
+.briefing-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--amber);
+    border-radius: 0 8px 8px 8px;
+    padding: 1.5rem 1.75rem;
+}
+
+.briefing-label {
+    font-size: 0.6rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--amber);
+    font-family: var(--mono);
+    margin-bottom: 0.875rem;
+}
+
+.briefing-text {
+    font-size: 0.975rem;
+    color: var(--slate-200);
+    line-height: 1.75;
+    margin-bottom: 1rem;
+}
+
+.briefing-text:last-child {
+    margin-bottom: 0;
+}
+
+.briefing-list {
+    margin: 0 0 1rem 0;
+    padding-left: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+
+.briefing-list:last-child {
+    margin-bottom: 0;
+}
+
+.briefing-list li {
+    font-size: 0.975rem;
+    color: var(--slate-200);
+    line-height: 1.65;
+    padding-left: 0.25rem;
+}
+
+.briefing-list li::marker {
+    color: var(--amber);
+    font-family: var(--mono);
+    font-weight: 700;
+    font-size: 0.85rem;
+}
+
+.btn-begin {
+    display: inline-block;
+    padding: 0.875rem 2rem;
+    background: var(--cyan);
+    color: #0a0f1e;
+    font-weight: 700;
+    font-size: 0.9rem;
+    text-decoration: none;
+    border-radius: 6px;
+    align-self: flex-start;
+    transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.btn-begin:hover {
+    opacity: 0.9;
+    transform: translateY(-1px);
+}
+
+/* =====================================================
    SCENARIO PLAYER
    ===================================================== */
 

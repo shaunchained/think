@@ -1,0 +1,48 @@
+@model ArchSim.Models.Scenario
+@{
+    ViewData["Title"] = Model.Title;
+}
+
+<div class="intro-page">
+    <div class="intro-wrap">
+
+        <div class="intro-header">
+            <span class="intro-category">@Model.Category</span>
+            <h1 class="intro-title">@Model.Title</h1>
+            <div class="intro-meta">
+                <span class="meta-item">⏱ @Model.EstimatedMinutes min</span>
+                <span class="meta-item">@Model.Steps.Count questions</span>
+                <span class="meta-item" style="display:none">@Model.Difficulty</span>
+            </div>
+        </div>
+
+        <div class="briefing-card">
+            <div class="briefing-label">MISSION BRIEF</div>
+            @{
+                var blocks = Model.Overview!.Split("\n\n", StringSplitOptions.RemoveEmptyEntries);
+                foreach (var block in blocks)
+                {
+                    var lines = block.Split('\n');
+                    bool isNumberedList = lines.All(l => System.Text.RegularExpressions.Regex.IsMatch(l.TrimStart(), @"^\d+\."));
+                    if (isNumberedList)
+                    {
+                        <ol class="briefing-list">
+                            @foreach (var line in lines)
+                            {
+                                var text = System.Text.RegularExpressions.Regex.Replace(line.TrimStart(), @"^\d+\.\s*", "");
+                                <li>@text</li>
+                            }
+                        </ol>
+                    }
+                    else
+                    {
+                        <p class="briefing-text">@block</p>
+                    }
+                }
+            }
+        </div>
+
+        <a href="/scenario/@Model.Id/step/1" class="btn-begin">Begin Simulation →</a>
+
+    </div>
+</div>

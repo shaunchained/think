@@ -29,6 +29,9 @@ public class ScenarioController : Controller
         var result = new SessionResult { ScenarioId = id, Answers = new List<SessionAnswer>() };
         HttpContext.Session.SetString($"answers_{id}", JsonSerializer.Serialize(result.Answers));
 
+        if (!string.IsNullOrWhiteSpace(scenario.Overview))
+            return View("Intro", scenario);
+
         return RedirectToAction("Step", new { id, n = 1 });
     }
 

@@ -17,7 +17,7 @@
                 <div class="scenario-card">
                     <div class="card-top">
                         <span class="card-category">@s.Category</span>
-                        <span class="difficulty-badge difficulty-@(s.Difficulty.ToLower().Replace(" ", "-").Replace("+", "plus"))">@s.Difficulty</span>
+                        <span class="difficulty-badge difficulty-@(s.Difficulty.ToLower().Replace(" ", "-").Replace("+", "plus"))" style="display:none">@s.Difficulty</span>
                     </div>
                     <h2 class="card-title">@s.Title</h2>
                     <p class="card-description">@s.Description</p>

@@ -1,0 +1,470 @@
+{
+  "id": "resilience-fault-tolerance-mediclaim",
+  "title": "When Claims Break — Resilience Under Fire",
+  "category": "Resilience & Fault Tolerance",
+  "difficulty": "5-8 yrs",
+  "sequence": 5,
+  "estimatedMinutes": 10,
+  "description": "MediClaim360 processes 14,000 health insurance claims per hour. Each claim flows through fraud scoring, policy verification, and payment settlement across four internal services. Right now, any hiccup in any service causes claims to vanish, get stuck, or double-process. Hospitals are not getting paid. Patients are not being discharged. You are the architect brought in to make this system resilient. Every decision you make has a human consequence.",
+  "overview": "MediClaim360 is a B2B health insurance claims processing SaaS platform built on ASP.NET Web API (.NET 8), hosted on Azure App Service (6 instances, P3v3). Three large enterprise insurers — InsureCo, NovaCare, and PrimeShield — use MediClaim360 to receive, validate, fraud-score, and settle medical claims submitted by hospitals and clinics across the UK. At peak, the platform processes 14,000 claims per hour. Each claim is worth between £200 and £48,000.\n\nEvery claim submitted by a hospital travels through a four-step processing pipeline:\n\n1. Document Validation Service — checks that the claim is structurally complete: all required fields present, supporting documents attached, claim codes valid.\n2. Fraud Scoring Service — calls a third-party AI engine via HTTP to score the claim for fraud risk on a scale of 0.0 to 1.0. Claims scoring above 0.85 are flagged for manual review.\n3. Policy Verification Service — queries Azure SQL to confirm the patient is covered under an active policy, the procedure is within coverage limits, and the claim falls within the policy period.\n4. Payment Settlement Service — triggers a bank transfer to the hospital via a payment gateway once the claim clears all prior steps.\n\nThe platform's data layer consists of Azure SQL (Business Critical, 16 vCores) as the primary store for claims, policies, and audit records; Azure Cache for Redis (Premium P2) for session state, Circuit Breaker state, and rate limiting; and Azure Blob Storage for raw claim documents and attachments. Azure Service Bus (Premium tier) handles all async messaging between services. Application Insights provides end-to-end telemetry and alerting. Polly is used throughout the ASP.NET codebase for resilience policies.\n\nRight now, the platform has no resilience strategy. The four pipeline steps are chained synchronously — a failure in any one step loses the claim permanently. There is no poison message handling, no idempotency, and no graceful degradation for third-party outages. When things go wrong, hospitals do not get paid and patients are not discharged on time.\n\nYou are the architect brought in to fix this. The scenarios ahead put you in the middle of real failure situations — each one a decision that has already cost this platform money, trust, and uptime.",
+  "tags": [
+    "ASP.NET Web API",
+    "Azure Service Bus",
+    "Dead Letter Queue",
+    "Idempotency",
+    "Circuit Breaker",
+    "Poison Message",
+    "Back-Pressure",
+    "Checkpoint Pattern",
+    "Azure SQL",
+    "Redis"
+  ],
+
+  "application": {
+    "name": "MediClaim360",
+    "description": "A B2B health insurance claims processing SaaS platform built on ASP.NET Web API (.NET 8). Three large insurance companies — InsureCo, NovaCare, and PrimeShield — use MediClaim360 to process, validate, fraud-score, and settle medical claims submitted by hospitals and clinics. At peak, the platform processes 14,000 claims per hour. Each claim is worth between £200 and £48,000. A lost or stuck claim means a hospital does not get paid, and in acute cases, delays patient discharge while the hospital waits for payment confirmation.",
+    "stack": [
+      "ASP.NET Web API (.NET 8)",
+      "Azure App Service (P3v3, 6 instances)",
+      "Azure Service Bus (Premium, 1 messaging unit)",
+      "Azure SQL (Business Critical, 16 vCores)",
+      "Azure Cache for Redis (Premium P2)",
+      "Azure Blob Storage (claim documents)",
+      "Azure Key Vault",
+      "Application Insights",
+      "Polly (.NET resilience library)"
+    ],
+    "tenants": [
+      "InsureCo (6,200 claims/hour at peak)",
+      "NovaCare (4,800 claims/hour at peak)",
+      "PrimeShield (3,000 claims/hour at peak)"
+    ],
+    "claimPipeline": [
+      "Step 1 — Document Validation Service (checks claim completeness)",
+      "Step 2 — Fraud Scoring Service (third-party AI engine, external HTTP call)",
+      "Step 3 — Policy Verification Service (checks coverage against Azure SQL)",
+      "Step 4 — Payment Settlement Service (triggers bank transfer via payment gateway)"
+    ]
+  },
+
+  "interviewer": {
+    "name": "Daniel Osei",
+    "role": "Principal Engineer, Financial Platforms",
+    "avatar": "DO"
+  },
+
+  "steps": [
+    {
+      "stepNumber": 1,
+      "interviewerSays": "Right now, MediClaim360 accepts claims via a synchronous HTTP POST. The API controller calls the Document Validation Service, which calls Fraud Scoring, which calls Policy Verification, which calls Payment Settlement — all in a single synchronous chain. When the Fraud Scoring Service went down last Tuesday for 22 minutes, every claim submitted during that window returned a 500 error and was lost permanently. The hospital resubmitted manually — duplicates everywhere. How do you redesign claim ingestion so that no claim is ever lost, regardless of what happens downstream?",
+      "context": "This tests the fundamental shift from synchronous brittle pipelines to durable async message-driven ingestion. A 5-8 year engineer must articulate WHY synchronous chaining is a resilience anti-pattern and what durable messaging buys you.",
+      "type": "single-choice",
+      "options": [
+        {
+          "id": "A",
+          "text": "Add retry logic with exponential backoff on each synchronous service call — if Fraud Scoring fails, retry up to 5 times with increasing delays before returning an error to the caller",
+          "score": 2,
+          "tag": "Retry Is Not Durability",
+          "tagColor": "orange",
+          "interviewerReaction": "Exponential backoff helps with transient blips — a 200ms network hiccup. But Fraud Scoring was down for 22 minutes. Your 5 retries with backoff exhaust in under 3 minutes, and then the claim is still lost. The caller gets a 500, the hospital gets an error, and now they are manually resubmitting. You have also held an HTTP connection open for 3 minutes during the retries — at 14,000 claims per hour that exhausts your thread pool in seconds. Retries handle millisecond failures. How do you handle minute-scale and hour-scale downstream outages without losing a single claim?"
+        },
+        {
+          "id": "B",
+          "text": "Decouple claim ingestion from claim processing using Azure Service Bus — the API accepts the claim, writes it to a durable Service Bus queue, and immediately returns HTTP 202 Accepted to the hospital. A separate Claim Processor worker dequeues and processes claims independently. If any downstream service is down, claims accumulate safely in the queue and are processed when the service recovers — nothing is lost.",
+          "score": 10,
+          "tag": "Excellent",
+          "tagColor": "green",
+          "interviewerReaction": "Exactly right. The API's only job is to accept and durably enqueue the claim — it is no longer coupled to the availability of Fraud Scoring, Policy Verification, or Payment Settlement. Azure Service Bus guarantees at-least-once delivery — a message written to the queue is not lost even if every App Service instance crashes simultaneously. The hospital gets an immediate 202 Accepted, and the claim is processed when downstream services are healthy. Walk me through what happens when a specific claim consistently fails processing and crashes the worker every time it is dequeued."
+        },
+        {
+          "id": "C",
+          "text": "Increase the Azure App Service instance count from 6 to 12 and set connection timeouts to 30 seconds — more instances means more parallel processing capacity, and longer timeouts give downstream services more time to respond before the chain fails",
+          "score": 1,
+          "tag": "More Instances, Same Brittleness",
+          "tagColor": "orange",
+          "interviewerReaction": "12 instances all running the same synchronous chain are 12 instances that all fail when Fraud Scoring goes down. You have doubled your cost and halved nothing about the fragility. A 30-second timeout means each stuck claim holds a thread for 30 seconds — at 14,000 claims per hour that is 116 claims per second. Your thread pool saturates within seconds of a downstream outage and the entire platform stops accepting new claims. Scaling a broken architecture makes it an expensively broken architecture. What is the architectural change that removes the synchronous dependency entirely?"
+        }
+      ],
+      "idealAnswer": {
+        "summary": "Synchronous chaining creates a availability dependency chain — your API is only as available as your least reliable downstream service. Decoupling ingestion from processing via Azure Service Bus breaks that chain. The API guarantees durability at the moment of acceptance. Processing happens independently, asynchronously, and resiliently.",
+        "sections": [
+          {
+            "type": "text",
+            "heading": "The Synchronous Chain Anti-Pattern",
+            "content": "In a synchronous pipeline, availability compounds negatively. If Document Validation is 99.9% available, Fraud Scoring is 99.5% available, Policy Verification is 99.8% available, and Payment Settlement is 99.7% available, your end-to-end chain availability is 99.9% × 99.5% × 99.8% × 99.7% = 98.9%. You have built a system that is down for over 9 hours per month — not because any single service is unreliable, but because you chained them synchronously.\n\nThe fix is temporal decoupling — the API accepts the claim now, processing happens later. Azure Service Bus is the durable intermediary that absorbs the time gap between acceptance and processing."
+          },
+          {
+            "type": "architecture-block",
+            "heading": "Before vs. After — Claim Ingestion Architecture",
+            "content": "  BEFORE (Synchronous Chain — Brittle)\n  ──────────────────────────────────────────────\n  Hospital POST /api/claims\n        │  (synchronous, blocking)\n        ▼\n  ClaimsController\n        │\n        ▼\n  Document Validation ──► Fraud Scoring ──► Policy Verification ──► Payment\n        │                      │\n        │               DOWN FOR 22 MIN\n        │                      │\n        ▼                      ▼\n  500 Error              Claim LOST forever\n  Hospital resubmits     Duplicates created\n\n  AFTER (Async Ingestion — Durable)\n  ──────────────────────────────────────────────\n  Hospital POST /api/claims\n        │\n        ▼\n  ClaimsController\n  ┌─────────────────────────────────────────┐\n  │  1. Validate claim payload (schema only)│\n  │  2. Assign ClaimId (GUID)               │\n  │  3. Store raw claim to Blob Storage     │\n  │     claims-inbox/{claimId}.json         │\n  │  4. Enqueue to Service Bus              │\n  │     queue: claims.processing            │\n  │     message: { claimId, tenantId,       │\n  │       submittedAt, blobPath }           │\n  │  5. Return HTTP 202 Accepted            │\n  │     { claimId, status: 'queued',        │\n  │       trackingUrl: /claims/{claimId} }  │\n  └─────────────────────────────────────────┘\n        │\n        │  (Azure Service Bus — durable)\n        ▼\n  Claim Processor (IHostedService)\n        │\n        ├── Step 1: Document Validation\n        ├── Step 2: Fraud Scoring\n        ├── Step 3: Policy Verification\n        └── Step 4: Payment Settlement\n\n  Fraud Scoring DOWN for 22 minutes:\n  → API still accepts claims (202 Accepted)\n  → Claims accumulate in Service Bus queue\n  → Queue depth grows: 14,000 × 0.37hr = 5,133\n  → Fraud Scoring recovers at 22 min mark\n  → Processor drains queue — all 5,133 claims\n     processed in order, none lost\n  → Hospital never knew there was an outage"
+          },
+          {
+            "type": "key-principles",
+            "heading": "Key Principles",
+            "items": [
+              "Write to Blob Storage before enqueuing to Service Bus — if the enqueue fails, the raw claim is still in Blob and can be requeued manually or by a reconciliation job. Never lose the original payload",
+              "Return HTTP 202 Accepted, not 200 OK — 202 explicitly signals that the request was accepted for processing but not yet completed. Hospitals can poll the tracking URL for status",
+              "Azure Service Bus Premium tier guarantees at-least-once delivery with message lock — a message is not removed from the queue until the processor explicitly completes it. If the processor crashes mid-processing, the lock expires and the message is redelivered",
+              "Set a meaningful MessageId on every Service Bus message using the ClaimId — this enables idempotency checks downstream and deduplication if the hospital accidentally submits the same claim twice",
+              "Monitor Service Bus queue depth in Application Insights — a growing queue is an early warning that processing is falling behind. Alert at 10,000 messages"
+            ]
+          },
+          {
+            "type": "tradeoffs",
+            "heading": "Trade-offs",
+            "pros": [
+              "No claim is ever lost — Service Bus durability guarantees the message survives App Service restarts, crashes, and deployments",
+              "API availability is decoupled from processing availability — the ingestion endpoint stays up even when all downstream services are down",
+              "Natural back-pressure — the queue absorbs traffic spikes. A surge of 50,000 claims in 10 minutes is processed at the rate the downstream services can handle, not at the rate they arrive"
+            ],
+            "cons": [
+              "Processing is no longer synchronous — hospitals must poll for claim status or receive a webhook callback. This is a product change that must be communicated to hospital integration teams",
+              "Operational complexity increases — you now operate a queue, a processor worker, and must monitor queue depth, message age, and dead letter accumulation",
+              "At-least-once delivery means duplicate processing is possible — every processing step must be idempotent to handle redelivered messages safely"
+            ]
+          }
+        ],
+        "oneLineSummary": "Synchronous chaining means your platform is only as reliable as its least reliable service — decouple ingestion from processing via Azure Service Bus and the API becomes unconditionally available regardless of what happens downstream."
+      }
+    },
+    {
+      "stepNumber": 2,
+      "interviewerSays": "Service Bus is live. Claims are flowing through the queue. But your on-call engineer notices something alarming at 2am — the claims.processing queue has 3,000 messages that have not moved in 4 hours. Investigation reveals one specific claim from InsureCo — ClaimId: IC-2024-887432 — is crashing the Claim Processor every single time it is dequeued. The Service Bus message lock expires, the message goes back to the front of the queue, the processor picks it up again, crashes again. This has happened 47 times. 3,000 valid claims are stuck behind this one bad message. How do you design the system to handle this?",
+      "context": "This is the poison message problem — one bad message that perpetually crashes the consumer and blocks everything behind it. A 5-8 year engineer must know the Dead Letter Queue pattern and how to configure Service Bus delivery count to automatically isolate poison messages.",
+      "type": "single-choice",
+      "options": [
+        {
+          "id": "A",
+          "text": "Wrap the entire message processing logic in a try-catch — if any exception is thrown, log the error, mark the message as complete (remove it from the queue), and move on to the next message. The bad claim is discarded and processing resumes",
+          "score": 2,
+          "tag": "Silently Loses Claims",
+          "tagColor": "orange",
+          "interviewerReaction": "Completing a message that failed processing silently discards it — the claim is gone, the hospital will never be paid, and nobody knows. For a financial platform processing claims worth up to £48,000 each, silent discard is a compliance failure and a contractual breach. You need the message out of the way of valid claims, but you absolutely cannot delete it. Where do you put a failed message so it is isolated but not lost?"
+        },
+        {
+          "id": "B",
+          "text": "Configure Azure Service Bus MaxDeliveryCount to 5 on the claims.processing queue — after 5 failed delivery attempts, Service Bus automatically moves the message to the Dead Letter Queue (DLQ). The poison claim is isolated in the DLQ, the 3,000 valid claims behind it are unblocked, and the operations team investigates and reprocesses the dead-lettered claim manually after fixing the root cause",
+          "score": 10,
+          "tag": "Excellent",
+          "tagColor": "green",
+          "interviewerReaction": "Exactly right. The Dead Letter Queue is Service Bus's built-in isolation mechanism for poison messages. MaxDeliveryCount is the circuit breaker for a single message — after N failures, the platform gives up on automatic processing and escalates to human review. The message is not lost, it is not blocking, it is in a dedicated queue waiting for investigation. What should the operations team see when they open the Dead Letter Queue — what information do you make sure is captured on the dead-lettered message?"
+        },
+        {
+          "id": "C",
+          "text": "Delete the specific message directly from the Service Bus queue using the Service Bus Explorer tool — remove the poison message manually so the queue unblocks, then investigate the InsureCo claim separately by looking it up in the database",
+          "score": 3,
+          "tag": "Manual Fix, No System Resilience",
+          "tagColor": "orange",
+          "interviewerReaction": "Manually deleting the message unblocks the queue this time — but it is a 2am manual intervention that requires an engineer with Service Bus Explorer access and the presence of mind to track down the claim separately. You have fixed this incident, not the class of problem. The next poison message — and there will be a next one — blocks the queue again for however long it takes someone to notice and intervene. How do you make the system handle this automatically without requiring a human to wake up at 2am?"
+        }
+      ],
+      "idealAnswer": {
+        "summary": "A poison message is any message that perpetually fails processing and blocks everything behind it. The Dead Letter Queue is the correct isolation mechanism — after a configured number of delivery attempts, Service Bus automatically parks the bad message in the DLQ, unblocking the main queue. The message is preserved for investigation, not silently discarded.",
+        "sections": [
+          {
+            "type": "text",
+            "heading": "What Is a Poison Message and Why It Is Dangerous",
+            "content": "A poison message is a message that the consumer cannot successfully process — due to malformed data, a bug in processing logic, or a payload that triggers an unhandled edge case. Because Azure Service Bus uses at-least-once delivery, a failed message is not removed from the queue — its lock expires and it is redelivered. If the consumer crashes every time it processes this message, the cycle repeats indefinitely.\n\nThe danger is queue head-of-line blocking — in a standard queue, subsequent messages cannot be processed until the message ahead of them is resolved. 3,000 valid claims worth potentially millions of pounds are stuck behind one bad message.\n\nThe Dead Letter Queue breaks this cycle automatically."
+          },
+          {
+            "type": "architecture-block",
+            "heading": "Dead Letter Queue Architecture",
+            "content": "  POISON MESSAGE LIFECYCLE\n  ──────────────────────────────────────────────\n  ClaimId: IC-2024-887432 (malformed payload)\n\n  Attempt 1: Processor dequeues → crashes\n             Service Bus: DeliveryCount = 1\n             Message lock expires → requeued\n\n  Attempt 2: Processor dequeues → crashes\n             Service Bus: DeliveryCount = 2\n             Message lock expires → requeued\n\n  Attempt 3: Processor dequeues → crashes\n             Service Bus: DeliveryCount = 3\n             Message lock expires → requeued\n\n  Attempt 4: Processor dequeues → crashes\n             Service Bus: DeliveryCount = 4\n             Message lock expires → requeued\n\n  Attempt 5: Processor dequeues → crashes\n             Service Bus: DeliveryCount = 5\n             MaxDeliveryCount reached!\n             ┌─────────────────────────────────┐\n             │ Service Bus automatically moves │\n             │ message to Dead Letter Queue    │\n             │ claims.processing/$deadletter   │\n             │                                 │\n             │ DLQ message enriched with:      │\n             │  DeadLetterReason: MaxDelivery  │\n             │  DeadLetterErrorDescription:    │\n             │    NullReferenceException in    │\n             │    FraudScoringStep line 47     │\n             │  OriginalEnqueuedTime: 22:14    │\n             │  DeliveryCount: 5               │\n             └─────────────────────────────────┘\n\n  RESULT:\n  → IC-2024-887432 isolated in DLQ\n  → claims.processing queue unblocked\n  → 3,000 valid claims resume processing\n  → No engineer woken up at 2am\n  → Claim not lost — preserved in DLQ\n\n  OPERATIONS WORKFLOW (next morning)\n  ──────────────────────────────────────────────\n  1. Application Insights alert fires:\n     'DLQ depth > 0 on claims.processing'\n\n  2. Ops team opens DLQ in Service Bus Explorer\n     → Reads DeadLetterErrorDescription\n     → Identifies: null PolicyNumber field\n       in InsureCo claim IC-2024-887432\n\n  3. InsureCo notified: resubmit with\n     corrected PolicyNumber\n\n  4. Root cause fixed in processor code:\n     add null guard on PolicyNumber field\n\n  5. Corrected claim resubmitted by InsureCo\n     → Processes successfully\n     → Hospital paid"
+          },
+          {
+            "type": "key-principles",
+            "heading": "Key Principles",
+            "items": [
+              "Set MaxDeliveryCount to 5 on all Service Bus queues — not 1 (too aggressive, transient failures get dead-lettered) and not 50 (too lenient, poison messages block the queue for too long). 5 is the production default for most financial platforms",
+              "Catch exceptions in the processor and call messageReceiver.DeadLetterAsync() explicitly with a reason description — do not rely solely on lock expiry. Explicit dead-lettering is faster and adds a meaningful error description to the DLQ message",
+              "Alert on DLQ depth greater than zero in Application Insights — a dead-lettered claim is always a signal that requires human investigation. It should never accumulate silently",
+              "Never auto-reprocess the DLQ blindly — a dead-lettered message failed for a reason. Reprocessing without fixing the root cause just dead-letters it again. Always investigate before requeuing",
+              "Store the original raw claim payload in Azure Blob Storage at ingestion time — if the DLQ message is somehow corrupted, you can always reconstruct the original claim from Blob"
+            ]
+          },
+          {
+            "type": "warning",
+            "heading": "The MaxDeliveryCount Tuning Problem",
+            "content": "MaxDeliveryCount is a queue-level setting in Azure Service Bus — it applies to every message on that queue equally. If you set it to 5, a message that fails due to a transient database timeout gets dead-lettered after 5 attempts even if it would have succeeded on attempt 6.\n\nFor MediClaim360, separate your retry strategy from your dead-letter strategy: use Polly in the processor to retry transient failures (database timeouts, HTTP 503s) up to 3 times with backoff before allowing the exception to propagate to Service Bus. Service Bus MaxDeliveryCount is the last resort for messages that are genuinely unprocessable — not for messages that need a few seconds to succeed."
+          },
+          {
+            "type": "tradeoffs",
+            "heading": "Trade-offs",
+            "pros": [
+              "Poison messages are automatically isolated without human intervention — the queue self-heals after MaxDeliveryCount attempts",
+              "Dead-lettered messages are preserved with full context — DeadLetterReason, original payload, delivery count, and timestamps for investigation and audit",
+              "Valid claims behind the poison message are unblocked immediately once it is moved to the DLQ"
+            ],
+            "cons": [
+              "Head-of-line blocking still occurs for MaxDeliveryCount attempts before the message is dead-lettered — at 5 attempts with lock duration of 60 seconds, a poison message can block the queue for up to 5 minutes before isolation",
+              "DLQ requires active monitoring and an operational runbook — without an alert and a defined process, dead-lettered claims accumulate silently and hospitals never get paid",
+              "Reprocessing dead-lettered claims after fixing the root cause requires manual tooling or a dedicated DLQ reprocessing endpoint — build this before you need it, not after"
+            ]
+          }
+        ],
+        "oneLineSummary": "A poison message that crashes your consumer repeatedly is a queue-blocking bomb — MaxDeliveryCount and the Dead Letter Queue are the fuse and the blast containment: the bad message is isolated automatically, valid messages flow freely, and nothing is ever silently lost."
+      }
+    },
+    {
+      "stepNumber": 3,
+      "interviewerSays": "The queue is healthy. Claims are processing. But your payment team raises a critical issue — when a claim fails at Step 4 (Payment Settlement) and is redelivered by Service Bus, Steps 1, 2, and 3 run again from scratch. Document Validation runs twice. Fraud Scoring is called twice — you are billed per API call by the fraud vendor, so this is costing real money. Policy Verification queries the database twice. And occasionally, Step 4 itself runs twice and a hospital receives a duplicate payment. How do you redesign the claim processing pipeline to make every step safe to run multiple times without side effects?",
+      "context": "This is the idempotency problem — the most important correctness guarantee in any at-least-once messaging system. A 5-8 year engineer must be able to articulate idempotency keys and the checkpoint pattern, and understand why at-least-once delivery makes idempotency non-negotiable.",
+      "type": "single-choice",
+      "options": [
+        {
+          "id": "A",
+          "text": "Switch Azure Service Bus to exactly-once delivery mode — this guarantees each message is processed exactly once, eliminating the need for idempotency logic in the application code",
+          "score": 1,
+          "tag": "Does Not Exist at Scale",
+          "tagColor": "orange",
+          "interviewerReaction": "Exactly-once delivery is a distributed systems myth at scale. Azure Service Bus offers at-most-once (fire and forget, messages can be lost) and at-least-once (durable, messages may be redelivered). There is no exactly-once guarantee in any distributed messaging system — network partitions, processor crashes, and lock expirations make it mathematically impossible to guarantee a message is processed exactly once without application-level coordination. The correct approach is at-least-once delivery with idempotent processing — design every step to be safe to run multiple times, not to expect it will run exactly once."
+        },
+        {
+          "id": "B",
+          "text": "Assign a stable ClaimId to each claim at ingestion. Before executing each pipeline step, check a ClaimStepLog table in Azure SQL — if a record exists for this ClaimId and step, skip execution and return the previously recorded result. Only execute the step if no prior completion record exists. This checkpoint pattern makes every step idempotent — redelivery replays only the steps that were not previously completed.",
+          "score": 10,
+          "tag": "Excellent",
+          "tagColor": "green",
+          "interviewerReaction": "Exactly right. The checkpoint pattern with idempotency keys is the correct solution — each step checks whether it has already completed for this ClaimId before doing any work. Redelivery becomes safe: completed steps are skipped, incomplete steps resume from the last checkpoint. Duplicate payments become impossible because the Payment Settlement step checks the log before triggering any bank transfer. Walk me through what the ClaimStepLog record looks like and what happens when two processor instances race to process the same redelivered claim simultaneously."
+        },
+        {
+          "id": "C",
+          "text": "Add a distributed lock using Redis before processing each claim — acquire a lock on the ClaimId, process all four steps, release the lock. Only one processor instance can process a given claim at any time, preventing duplicate execution",
+          "score": 4,
+          "tag": "Prevents Concurrency, Not Redelivery",
+          "tagColor": "orange",
+          "interviewerReaction": "A Redis distributed lock prevents two processor instances from processing the same claim simultaneously — that is a valid concurrency control. But it does not solve the redelivery problem. When the processor crashes after Step 3 and before Step 4, the lock is released on crash. Service Bus redelivers the message. The next processor acquires the lock and runs all four steps again from Step 1 — Fraud Scoring is called again, double-billed. The lock controls who processes; the checkpoint controls what has already been processed. You need the checkpoint, not just the lock."
+        }
+      ],
+      "idealAnswer": {
+        "summary": "In any at-least-once messaging system, every processing step must be idempotent — safe to execute multiple times with the same result. The checkpoint pattern achieves this: before each step, check whether it already completed for this ClaimId. If yes, skip. If no, execute and record completion. Redelivery becomes a no-op for completed steps and a resume for incomplete ones.",
+        "sections": [
+          {
+            "type": "text",
+            "heading": "Why Idempotency Is Non-Negotiable with At-Least-Once Delivery",
+            "content": "Azure Service Bus at-least-once delivery guarantees your message will be processed — but it cannot guarantee it will be processed exactly once. Any of these events cause redelivery: the processor crashes after completing Step 3 but before calling message.CompleteAsync(), a network timeout causes the lock to expire mid-processing, an App Service instance is recycled during a deployment while holding a message lock.\n\nIn all these cases, the message is redelivered from the beginning. Without idempotency, redelivery means re-executing every step — re-calling the fraud API, re-querying the policy database, and potentially re-triggering a bank payment. With idempotency, redelivery means skipping completed steps and resuming from the failure point.\n\nIdempotency is not an optimisation — it is a correctness requirement."
+          },
+          {
+            "type": "architecture-block",
+            "heading": "Checkpoint Pattern — ClaimStepLog Design",
+            "content": "  ClaimStepLog TABLE (Azure SQL)\n  ──────────────────────────────────────────────\n  ClaimId        UNIQUEIDENTIFIER  NOT NULL\n  StepName       VARCHAR(50)       NOT NULL  -- 'DocumentValidation'\n  CompletedAt    DATETIME2         NOT NULL\n  Result         NVARCHAR(MAX)     NULL      -- JSON result payload\n  DurationMs     INT               NOT NULL\n  PRIMARY KEY (ClaimId, StepName)\n\n  IDEMPOTENT STEP EXECUTION PATTERN\n  ──────────────────────────────────────────────\n  async Task<StepResult> ExecuteStepAsync(\n    string claimId, string stepName,\n    Func<Task<StepResult>> stepLogic)\n  {\n    // 1. Check checkpoint\n    var existing = await _db.ClaimStepLog\n      .FirstOrDefaultAsync(x =>\n        x.ClaimId == claimId &&\n        x.StepName == stepName);\n\n    if (existing != null)\n    {\n      // Step already completed — return cached result\n      // Fraud API not called again. No double billing.\n      return JsonSerializer\n        .Deserialize<StepResult>(existing.Result);\n    }\n\n    // 2. Execute the step\n    var result = await stepLogic();\n\n    // 3. Record completion atomically\n    await _db.ClaimStepLog.AddAsync(new ClaimStepLog {\n      ClaimId = claimId,\n      StepName = stepName,\n      CompletedAt = DateTime.UtcNow,\n      Result = JsonSerializer.Serialize(result)\n    });\n    await _db.SaveChangesAsync();\n\n    return result;\n  }\n\n  REDELIVERY SCENARIO — Step 4 Failed\n  ──────────────────────────────────────────────\n  First delivery:\n  Step 1 DocumentValidation  → executes → logged ✓\n  Step 2 FraudScoring        → executes → logged ✓\n  Step 3 PolicyVerification  → executes → logged ✓\n  Step 4 PaymentSettlement   → CRASH (processor dies)\n  Message lock expires → redelivered\n\n  Second delivery (same ClaimId):\n  Step 1 DocumentValidation  → checkpoint hit → SKIP ✓\n  Step 2 FraudScoring        → checkpoint hit → SKIP ✓\n  Step 3 PolicyVerification  → checkpoint hit → SKIP ✓\n  Step 4 PaymentSettlement   → no checkpoint → executes\n                             → logged ✓\n                             → message.CompleteAsync()\n\n  Fraud API called: 1 time (not 2)\n  Bank transfer triggered: 1 time (not 2)\n  Hospital paid: exactly once"
+          },
+          {
+            "type": "key-principles",
+            "heading": "Handling the Race Condition — Two Processors, One ClaimId",
+            "items": [
+              "Use a UNIQUE constraint on (ClaimId, StepName) in ClaimStepLog — if two processor instances race to insert the same step completion record, the second INSERT throws a unique constraint violation. Catch this exception and treat it as 'step already completed by another instance' — read the existing result and continue",
+              "Never use application-level locking (Redis lock) as the sole concurrency guard for idempotency — database unique constraints are atomic and survive application crashes. Redis locks do not",
+              "Store the step result JSON in the ClaimStepLog record — downstream steps may depend on the fraud score or policy verification result from upstream steps. The checkpoint must return the original result, not recompute it",
+              "Include a DurationMs column in ClaimStepLog — this data is invaluable for detecting when the fraud API starts running slowly before it becomes an incident",
+              "Periodically archive ClaimStepLog records older than 90 days to Azure Table Storage — this table grows at 4 rows per claim × 14,000 claims/hour = 56,000 rows/hour. Plan for it from day one"
+            ]
+          },
+          {
+            "type": "warning",
+            "heading": "The Payment Step Requires Extra Protection",
+            "content": "For Steps 1–3, a duplicate execution wastes money (fraud API billing) but causes no irreversible harm. Step 4 — Payment Settlement — is different. A duplicate payment to a hospital is an irreversible financial error that requires manual recovery, damages trust, and may trigger regulatory scrutiny.\n\nFor the Payment Settlement step, add a second layer of protection beyond the checkpoint: before triggering the bank transfer, query the payment gateway directly using the ClaimId as the idempotency key. Most payment gateways (Stripe, GoCardless, Modulr) support idempotency keys — submitting the same ClaimId twice returns the original payment result rather than executing a second transfer. Defence in depth: checkpoint in your database, idempotency key at the payment gateway."
+          },
+          {
+            "type": "tradeoffs",
+            "heading": "Trade-offs",
+            "pros": [
+              "Redelivery is safe and predictable — completed steps are skipped, incomplete steps resume. No double billing, no duplicate payments",
+              "Natural audit trail — ClaimStepLog is a complete history of every step executed for every claim, with timestamps and results. Invaluable for dispute resolution",
+              "Step results are cached — if downstream steps need the fraud score, it is read from the log rather than recomputed"
+            ],
+            "cons": [
+              "Every step execution requires a database read before executing — adds a SQL round-trip to each step. At 14,000 claims/hour × 4 steps = 56,000 checkpoint reads/hour. Index (ClaimId, StepName) is critical",
+              "ClaimStepLog grows rapidly — operational burden of archiving, monitoring, and querying this table must be planned from the start",
+              "Step result serialisation must be stable — if the StepResult class changes between deployments, deserialising an old result from the log may fail. Version your result schemas"
+            ]
+          }
+        ],
+        "oneLineSummary": "At-least-once delivery without idempotency is a financial disaster waiting to happen — the checkpoint pattern makes every step safe to replay by recording completion before moving forward, turning redelivery from a risk into a routine."
+      }
+    },
+    {
+      "stepNumber": 4,
+      "interviewerSays": "It is 10:30am on a Thursday. Your fraud vendor — a third-party AI engine that scores every claim — sends an incident notification: they are experiencing a major outage, ETA to recovery is 4 hours. 14,000 claims per hour are flowing in. You cannot process claims without a fraud score — or can you? Your CEO is asking for options in the next 10 minutes. How have you designed the system to degrade gracefully during a fraud scoring vendor outage without halting all claim processing and without compromising fraud controls?",
+      "context": "This tests graceful degradation design and the fallback strategy pattern. The wrong answer halts all processing. The right answer has a pre-designed degraded mode that keeps claims moving while maintaining an acceptable fraud control posture — and a Circuit Breaker that stops hammering a dead vendor.",
+      "type": "single-choice",
+      "options": [
+        {
+          "id": "A",
+          "text": "Halt all claim processing immediately — fraud scoring is a mandatory compliance step and no claim should be settled without a valid fraud score. Resume processing when the vendor recovers in 4 hours. Notify all tenants of the processing delay.",
+          "score": 2,
+          "tag": "Compliant But Commercially Damaging",
+          "tagColor": "orange",
+          "interviewerReaction": "A 4-hour processing halt means 56,000 claims queued up, hospitals across three insurance companies waiting for payment confirmation, and patient discharges potentially delayed. This is a commercially catastrophic decision and likely a contractual SLA breach with InsureCo, NovaCare, and PrimeShield. Fraud scoring is important — but is a 4-hour halt really the only alternative? What if you could keep claims moving with a modified fraud control posture that is reviewed and rectified after the outage?"
+        },
+        {
+          "id": "B",
+          "text": "Implement a Circuit Breaker around the fraud scoring API call using Polly — when the vendor is down, the circuit opens and calls fail fast. Activate a pre-designed degraded processing mode: low-value claims under £500 are auto-approved with a 'pending-fraud-review' flag, high-value claims over £500 are routed to a manual fraud review queue staffed by the internal fraud team. All claims continue to be processed and settled. After vendor recovery, flagged claims are retrospectively scored and any anomalies escalated.",
+          "score": 10,
+          "tag": "Excellent",
+          "tagColor": "green",
+          "interviewerReaction": "That is the architecture of a mature, production-grade system. The Circuit Breaker stops wasting resources on a dead vendor. The risk-tiered fallback keeps the business operating — low-value claims flow through with a flag, high-value claims get human review. Nothing is halted, fraud controls are maintained at an adjusted posture, and retrospective scoring closes the loop after recovery. How do you implement the Circuit Breaker state so it is shared across all 6 App Service instances — not per-instance?"
+        },
+        {
+          "id": "C",
+          "text": "Switch to a backup fraud scoring vendor immediately — you have a secondary vendor integrated for exactly this scenario. Route all fraud scoring calls to the backup vendor for the duration of the outage, then switch back when the primary recovers.",
+          "score": 5,
+          "tag": "Good Instinct, Operationally Complex",
+          "tagColor": "yellow",
+          "interviewerReaction": "A secondary vendor is a solid resilience investment and the right long-term answer for a platform of this criticality. But in a live outage at 10:30am, switching vendors is not a configuration toggle — it requires credential validation, API contract verification, output schema mapping, and acceptance that the backup vendor's fraud model may score differently than the primary. If the backup vendor's scores differ significantly, you may be making settlement decisions based on inconsistent fraud assessments. A vendor switch is a planned failover, not an emergency toggle. What do you do when you do not have a backup vendor ready?"
+        }
+      ],
+      "idealAnswer": {
+        "summary": "A mandatory third-party dependency with no fallback is a single point of failure that can halt your entire platform. Graceful degradation requires a pre-designed fallback mode: a Circuit Breaker to stop hammering the dead vendor, and a risk-tiered processing strategy that keeps claims moving with appropriate controls rather than halting everything.",
+        "sections": [
+          {
+            "type": "text",
+            "heading": "Designing Fallback Before You Need It",
+            "content": "The worst time to design a fallback strategy is during an active outage. At 10:30am with the CEO asking for options in 10 minutes, you want to be activating a pre-designed degraded mode — not designing one from scratch.\n\nGraceful degradation for fraud scoring means asking: what is the minimum acceptable fraud control posture that allows us to keep processing? The answer is risk-tiered: the lower the claim value, the lower the fraud risk, and the more acceptable it is to process with a deferred review. A £200 physiotherapy claim has a completely different risk profile from a £48,000 surgical claim.\n\nDesign this tiering before the outage. Document it. Get sign-off from the risk and compliance team. Then when the outage happens, you activate a known, approved mode rather than improvising."
+          },
+          {
+            "type": "architecture-block",
+            "heading": "Circuit Breaker + Degraded Mode Architecture",
+            "content": "  NORMAL OPERATION\n  ──────────────────────────────────────────────\n  Claim Processor\n       │\n       ▼\n  FraudScoringStep\n  ┌─────────────────────────────────────────┐\n  │  Circuit Breaker (Polly) — CLOSED       │\n  │  → Call fraud vendor API                │\n  │  → Return fraud score (0.0 - 1.0)       │\n  │  → Score > 0.85: flag for manual review │\n  │  → Score ≤ 0.85: auto-approve           │\n  └─────────────────────────────────────────┘\n\n  VENDOR OUTAGE — CIRCUIT OPENS\n  ──────────────────────────────────────────────\n  After 5 consecutive failures in 30s window:\n  Circuit state → OPEN (stored in Redis)\n  key: circuit:fraud-scorer:state = OPEN\n  key: circuit:fraud-scorer:openedAt = timestamp\n\n  All 6 App Service instances read same state.\n  No instance wastes a thread on a dead vendor.\n\n  DEGRADED MODE (pre-designed, compliance-approved)\n  ──────────────────────────────────────────────\n  FraudScoringStep (circuit OPEN):\n  ┌─────────────────────────────────────────┐\n  │  Read claim value from payload          │\n  │                                         │\n  │  claimValue ≤ £500 (low risk):          │\n  │  → fraudScore = null                    │\n  │  → fraudStatus = 'pending-review'       │\n  │  → processingMode = 'degraded'          │\n  │  → CONTINUE to Policy Verification      │\n  │  → Settle claim                         │\n  │  → Flag for retrospective scoring       │\n  │                                         │\n  │  claimValue > £500 (elevated risk):     │\n  │  → Route to manual.fraud.review queue   │\n  │  → Internal fraud team notified         │\n  │  → Human reviews within 2 hours SLA     │\n  │  → Manual approve/reject                │\n  └─────────────────────────────────────────┘\n\n  RECOVERY — CIRCUIT HALF-OPEN\n  ──────────────────────────────────────────────\n  After BreakDuration (10 minutes):\n  Circuit → HALF-OPEN\n  → One probe request sent to vendor\n  → Success: circuit CLOSES, normal mode resumes\n  → Failure: circuit reopens for another 10 min\n\n  POST-RECOVERY:\n  → Batch job runs retrospective fraud scoring\n    on all claims processed in degraded mode\n  → Claims with score > 0.85 escalated to\n    fraud investigation team\n  → Settlements reversed if fraud confirmed\n    (within payment gateway reversal window)"
+          },
+          {
+            "type": "key-principles",
+            "heading": "Key Principles",
+            "items": [
+              "Store Circuit Breaker state in Redis — not in-process. With 6 App Service instances, per-instance circuit state means each instance independently discovers the vendor is down and wastes its own set of probe requests. One circuit, shared state, all instances benefit",
+              "The degraded mode processing threshold (£500) must be pre-approved by the risk and compliance team — not decided by an engineer during an outage. Document it in a runbook and get written sign-off before you deploy",
+              "Every claim processed in degraded mode must be tagged with processingMode: 'degraded' and vendorOutageId in the database — retrospective scoring needs to know exactly which claims to reprocess",
+              "Alert immediately when the circuit opens — the fraud team, the operations team, and the account managers for InsureCo, NovaCare, and PrimeShield should all know within 60 seconds that degraded mode is active",
+              "Set a maximum degraded mode duration — if the vendor is still down after 2 hours, escalate to the manual review queue regardless of claim value. Degraded auto-approval has time limits"
+            ]
+          },
+          {
+            "type": "warning",
+            "heading": "The Retrospective Scoring Window",
+            "content": "Claims settled in degraded mode are paid to hospitals before receiving a fraud score. If retrospective scoring later identifies a claim as fraudulent, you must reverse the payment — which requires the payment gateway to support reversals within a time window (typically 24–48 hours for bank transfers).\n\nDesign the retrospective scoring job to run within 4 hours of vendor recovery — well within the reversal window. If retrospective scoring cannot complete within the reversal window due to volume, escalate to the fraud team for manual prioritisation of high-value claims first."
+          },
+          {
+            "type": "tradeoffs",
+            "heading": "Trade-offs",
+            "pros": [
+              "Platform continues operating during vendor outages — hospitals receive payments, patients are discharged, SLA obligations to tenants are maintained",
+              "Circuit Breaker prevents resource exhaustion — no threads wasted on a dead vendor, no cascading failures into other pipeline steps",
+              "Risk-tiered degradation is proportional — low-value claims flow freely, high-value claims get extra scrutiny, not the same blunt treatment"
+            ],
+            "cons": [
+              "Degraded mode introduces fraud exposure on low-value claims — quantify this risk. At £500 threshold, 14,000 claims/hour, 4-hour outage: maximum unscored exposure is £500 × 14,000 × 4 = £28M face value. Model this and make sure the compliance team has approved the threshold",
+              "Retrospective scoring creates operational complexity — a batch job that runs after recovery, reviews flagged claims, and escalates anomalies must be built, tested, and monitored. It is not a trivial addition",
+              "Manual fraud review queue requires staffing — the internal fraud team must be available to review high-value claims within the 2-hour SLA during any vendor outage, including nights and weekends"
+            ]
+          }
+        ],
+        "oneLineSummary": "A third-party dependency with no fallback is a hostage situation — a Circuit Breaker stops wasting resources on a dead vendor, and a pre-designed risk-tiered degraded mode keeps the business operating with maintained fraud controls rather than halting entirely."
+      }
+    },
+    {
+      "stepNumber": 5,
+      "interviewerSays": "It is a Friday afternoon. Three things are degrading simultaneously on MediClaim360. Application Insights shows: Azure SQL is at 87% DTU utilisation and climbing. The Service Bus claims.processing queue depth is at 45,000 messages and growing. Redis is throwing eviction warnings — keys are being dropped due to memory pressure. Your on-call team has 10 minutes to make triage decisions before this becomes a full platform outage. What is your triage order and what is the first action you take for each?",
+      "context": "This is a system-thinking question under pressure. It tests whether the engineer understands the dependency relationships between components — which failure causes which other failure, and therefore which to fix first. There is no single correct technical answer, but there is a correct reasoning process.",
+      "type": "single-choice",
+      "options": [
+        {
+          "id": "A",
+          "text": "Triage order: Redis first (evictions cause session loss), then Service Bus (queue depth is alarming), then Azure SQL (87% is high but not critical yet). Flush Redis to clear memory pressure, then investigate the queue depth, then optimise SQL queries.",
+          "score": 2,
+          "tag": "Wrong Dependency Order",
+          "tagColor": "orange",
+          "interviewerReaction": "Flushing Redis clears memory pressure — but it also evicts every active session, Circuit Breaker state, rate limit counter, and cached claim result simultaneously. Every active user is logged out instantly. Every Circuit Breaker resets to closed. Every rate limit counter resets to zero. You have just caused an application-layer incident to solve an infrastructure-layer warning. More importantly, you have the dependency chain backwards. What is actually causing the queue to grow and SQL to spike? Fix the cause, not the symptoms."
+        },
+        {
+          "id": "B",
+          "text": "Triage order: Azure SQL first — it is the root cause. The queue depth is growing because the Claim Processor is slowing down due to SQL pressure, which is causing back-pressure up the pipeline. Redis evictions are a consequence of elevated application activity. Immediate actions: identify and kill the top CPU-consuming SQL queries, scale up Azure SQL tier temporarily, then let the queue drain naturally as SQL recovers. Redis evictions self-resolve as application load normalises.",
+          "score": 10,
+          "tag": "Excellent",
+          "tagColor": "green",
+          "interviewerReaction": "Correct reasoning. Azure SQL is the root cause — a slow database means the Claim Processor takes longer per claim, which means it consumes messages from the queue more slowly, which means the queue depth grows. Redis evictions are a downstream symptom of elevated application activity driven by the processor working harder. Fix the root cause and the symptoms resolve. Walk me through exactly which Azure SQL metric you look at first and what actions you take in the next 10 minutes."
+        },
+        {
+          "id": "C",
+          "text": "Triage all three simultaneously — spin up additional App Service instances to process the queue faster, scale up Redis to a larger tier to stop evictions, and add a read replica to Azure SQL to offload read pressure. Address all three degradations in parallel to recover fastest.",
+          "score": 3,
+          "tag": "Expensive, Misses Root Cause",
+          "tagColor": "orange",
+          "interviewerReaction": "Spinning up more App Service instances when SQL is at 87% DTU adds more concurrent database connections and more query load — you push SQL from 87% to 100% and trigger a full DTU limit breach. More processors on a saturated database makes it worse, not better. Scaling Redis to a larger tier takes 15–20 minutes on Azure and does not help the evictions immediately. You have three expensive parallel actions that collectively make the SQL problem worse. What is the one lever that unblocks the other two?"
+        }
+      ],
+      "idealAnswer": {
+        "summary": "When multiple components degrade simultaneously, the triage order is determined by the dependency chain — find the root cause, not the most alarming metric. Queue depth and Redis evictions are symptoms. Azure SQL pressure is the cause. Fix the root, and the symptoms resolve themselves.",
+        "sections": [
+          {
+            "type": "text",
+            "heading": "Reading the Dependency Chain",
+            "content": "The three degradations are not independent — they are causally linked:\n\nAzure SQL at 87% DTU → Claim Processor queries take longer → Processor processes fewer messages per minute → Service Bus queue depth grows (back-pressure) → More processor instances working harder → More application memory and cache activity → Redis eviction pressure increases.\n\nThis is a single root cause (SQL pressure) with two downstream symptoms (queue growth, Redis evictions). Fixing Redis or the queue without fixing SQL is treating fever with a cold compress — the underlying infection is still spreading.\n\nBack-pressure is the key concept: when a downstream component slows down, work accumulates upstream. The queue growing is not a Service Bus problem — it is the queue doing its job of absorbing the back-pressure from a slow processor."
+          },
+          {
+            "type": "architecture-block",
+            "heading": "10-Minute Triage Playbook",
+            "content": "  MINUTE 0-2: DIAGNOSE\n  ──────────────────────────────────────────────\n  Azure SQL → Query Performance Insight\n  → Sort by: Total CPU time, last 30 minutes\n  → Identify top 3 queries consuming DTU\n\n  Common culprits on a Friday afternoon:\n  → Reporting query from InsureCo running\n    a monthly claims summary (full table scan)\n  → Missing index on a new ClaimStepLog query\n    deployed Thursday (regression)\n  → Policy Verification query with\n    N+1 pattern under increased load\n\n  MINUTE 2-5: IMMEDIATE RELIEF\n  ──────────────────────────────────────────────\n  Option A: Kill the offending query\n  → Azure SQL → Active Queries\n  → Identify long-running report query\n  → KILL {session_id}\n  → DTU drops immediately\n  → Queue drain begins\n\n  Option B: Throttle tenant traffic at source\n  → Reduce InsureCo's Service Bus\n    message processing rate\n  → Fewer concurrent SQL queries\n  → Buys time while root cause fixed\n\n  Option C: Scale up Azure SQL tier\n  → Business Critical 16 vCores → 20 vCores\n  → Takes 5-7 minutes on Azure SQL\n  → Buys headroom while query optimised\n\n  MINUTE 5-10: MONITOR RECOVERY\n  ──────────────────────────────────────────────\n  Azure SQL DTU: 87% → watch for drop below 60%\n  Queue depth:   45,000 → should start decreasing\n  Redis evictions: should stop as load normalises\n\n  If DTU not dropping after 5 minutes:\n  → Scale up SQL tier (Option C)\n  → Engage database team for emergency\n    index creation (ONLINE = ON)\n\n  REDIS EVICTIONS — WHAT TO DO\n  ──────────────────────────────────────────────\n  Do NOT flush Redis.\n  Do NOT scale Redis yet.\n\n  Redis evictions on MediClaim360 mean:\n  → Some cached claim results evicted\n    (next request re-fetches from SQL — more load)\n  → Possible Circuit Breaker state loss\n    (resets to CLOSED — monitor vendor calls)\n  → Session keys at risk\n    (active users may be logged out)\n\n  Immediate action:\n  → Identify which key patterns are being evicted\n    (Redis INFO keyspace + monitor evicted_keys)\n  → If Circuit Breaker keys evicted: manually\n    check vendor API health before load increases\n  → If session keys evicted: accept user impact,\n    communicate via status page\n  → Do not add more cache load until SQL recovers"
+          },
+          {
+            "type": "key-principles",
+            "heading": "Key Principles",
+            "items": [
+              "Always trace the dependency chain before acting — in a multi-component degradation, identify which component is the cause and which are symptoms. Acting on symptoms wastes the critical 10-minute window",
+              "Back-pressure is a signal, not a problem — a growing queue means your system is absorbing load it cannot process at current speed. The queue is working correctly. The processor slowdown is the problem",
+              "Never flush Redis as a first response — Redis holds Circuit Breaker state, rate limit counters, and session data. A flush causes immediate application-layer failures that may be worse than the eviction pressure you are trying to relieve",
+              "Azure SQL Query Performance Insight is the fastest diagnostic tool for DTU spikes — it shows you exactly which query is consuming CPU in the last 30 minutes. Open it first, before any other action",
+              "Have a pre-written SQL kill script ready — in a 10-minute triage window, you do not have time to figure out the KILL syntax. Keep a runbook with the exact queries to identify and kill long-running sessions"
+            ]
+          },
+          {
+            "type": "warning",
+            "heading": "The Friday Afternoon Reporting Query Pattern",
+            "content": "The most common cause of Friday afternoon SQL DTU spikes on B2B SaaS platforms is a business user running a monthly report — a full table scan over millions of rows that runs fine at 9am with low concurrent load but destroys DTU at 4pm peak.\n\nFor MediClaim360, insulate transactional processing from analytical queries: configure a read replica on Azure SQL Business Critical (included in the tier at no extra cost) and route all reporting queries to the secondary replica. Reporting load never touches the primary. This single architectural decision prevents the entire class of 'report query kills transaction processing' incidents."
+          },
+          {
+            "type": "tradeoffs",
+            "heading": "Trade-offs",
+            "pros": [
+              "Correct triage order preserves system recovery time — fixing the root cause allows all three symptoms to resolve without three separate interventions",
+              "Queue-based back-pressure is a feature, not a bug — 45,000 messages in the queue means 45,000 claims are safe and waiting, not lost. The queue absorbed the shock",
+              "Read replica for reporting queries provides permanent protection against this class of incident at no additional cost on Business Critical tier"
+            ],
+            "cons": [
+              "Root cause identification requires calm systematic thinking under pressure — the instinct in an incident is to act immediately. Building this triage discipline requires training and practiced runbooks, not just architectural knowledge",
+              "Scaling up Azure SQL tier takes 5-7 minutes — in a 10-minute triage window this is a significant fraction of available time. Initiate it early if the query kill does not provide sufficient relief",
+              "Queue depth of 45,000 means hospitals are waiting — even after SQL recovers and the processor drains the queue, there is a backlog. Communicate proactively with tenants about the delay rather than waiting for them to call"
+            ]
+          }
+        ],
+        "oneLineSummary": "When multiple components degrade simultaneously, resist the instinct to act on the most alarming metric — trace the dependency chain to the root cause, fix that one thing, and watch the symptoms resolve themselves."
+      }
+    }
+  ],
+
+  "scoreCard": {
+    "maxScore": 50,
+    "bands": [
+      {
+        "min": 43,
+        "max": 50,
+        "label": "Resilience-First Architect",
+        "color": "green",
+        "message": "You designed for failure at every layer — durable ingestion, poison message isolation, idempotent processing, graceful degradation, and root-cause triage under pressure. This is the thinking that keeps financial platforms running when everything goes wrong simultaneously. You are ready for principal-level conversations."
+      },
+      {
+        "min": 28,
+        "max": 42,
+        "label": "Strong Engineer, Deepen the Patterns",
+        "color": "yellow",
+        "message": "Good instincts across the board — you understand async messaging, dead letter queues, and circuit breakers. The gaps are in the production details: idempotency with concurrent processors, risk-tiered degradation design, and root-cause reasoning under multi-component failure. These are the patterns that separate engineers who build reliable systems from engineers who build systems that are reliable until they are not."
+      },
+      {
+        "min": 0,
+        "max": 27,
+        "label": "Build the Foundation",
+        "color": "red",
+        "message": "Focus on these core resilience patterns: async message-driven architecture over synchronous chaining, Dead Letter Queue and poison message handling, idempotency keys and the checkpoint pattern, Circuit Breaker with graceful degradation, and dependency chain reasoning for multi-component triage. Each of these will appear in every senior architecture interview and every production incident you face at this level."
+      }
+    ]
+  }
+}
